@@ -201,6 +201,10 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Node / app runtime
+node_modules/
+data/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

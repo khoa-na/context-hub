@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM Wiki Starter</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">LLM Wiki Starter</p>
+          <h1>Upload a file, turn it into Markdown, then ask grounded questions.</h1>
+          <p class="hero-copy">
+            This starter keeps things intentionally small: upload a text-based file, store a Markdown version, and run document Q&A through the Google Gemini API.
+          </p>
+        </div>
+        <div class="hero-card">
+          <p>Supported in this version</p>
+          <ul>
+            <li>.txt, .md, .json</li>
+            <li>.csv, .tsv, .html, .docx</li>
+            <li>source code files like .js, .ts, .py</li>
+          </ul>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel upload-panel">
+          <div class="panel-head">
+            <h2>Gemini Settings</h2>
+            <p>Paste your API key here to use the app without editing `.env`. It is kept only in the current session.</p>
+          </div>
+
+          <div class="settings-card">
+            <label class="field-label" for="api-key-input">Gemini API key</label>
+            <div class="inline-field">
+              <input
+                id="api-key-input"
+                type="password"
+                placeholder="AIza..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button id="save-key-button" class="secondary-button" type="button">Save key</button>
+            </div>
+            <label class="checkbox-row">
+              <input id="show-key-toggle" type="checkbox" />
+              <span>Show key</span>
+            </label>
+            <p id="key-status" class="status-line"></p>
+          </div>
+
+          <div class="panel-head">
+            <h2>1. Upload</h2>
+            <p>Upload a local file and convert it to Markdown on the server.</p>
+          </div>
+
+          <label class="upload-dropzone" for="file-input">
+            <input
+              id="file-input"
+              type="file"
+              accept=".txt,.text,.log,.md,.mdx,.json,.csv,.tsv,.html,.htm,.xml,.docx,.js,.jsx,.ts,.tsx,.py,.java,.go,.rb,.rs,.sql,.css,.yaml,.yml"
+            />
+            <button id="pick-file-button" class="secondary-button" type="button">Choose file</button>
+            <span id="selected-file-name">No file selected yet</span>
+            <small>The browser uploads the file directly, including `.docx`, then the server stores a Markdown copy.</small>
+          </label>
+
+          <button id="upload-button" class="primary-button" type="button" disabled>Convert to Markdown</button>
+          <p id="upload-status" class="status-line"></p>
+
+          <div class="document-list-wrap">
+            <div class="panel-head compact">
+              <h2>2. Documents</h2>
+              <p>Uploaded documents used as shared context for chat.</p>
+            </div>
+            <div id="document-list" class="document-list"></div>
+          </div>
+        </section>
+
+        <section class="panel chat-panel chat-panel-wide">
+          <div class="panel-head">
+            <h2>3. Ask</h2>
+            <p>Questions are answered from all uploaded documents.</p>
+          </div>
+
+          <div id="chat-log" class="chat-log">
+            <article class="bubble assistant">
+              <strong>Assistant</strong>
+              <p>Ask about any uploaded file. I will search across all uploaded documents.</p>
+            </article>
+          </div>
+
+          <form id="chat-form" class="chat-form">
+            <textarea
+              id="chat-input"
+              rows="4"
+              placeholder="What does this file say about...?"
+            ></textarea>
+            <button class="primary-button" type="submit">Ask Gemini</button>
+          </form>
+
+          <div class="source-box">
+            <p class="source-title">Retrieved chunks</p>
+            <div id="source-list" class="source-list">No retrieval yet.</div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
