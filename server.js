@@ -600,14 +600,14 @@ async function generateChunkTitles(chunks, apiKey) {
 
   for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
     const batch = chunks.slice(i, i + BATCH_SIZE);
-    const previewLines = batch.map((c, idx) => `[${i + idx}] Title: "${c.title}"\nContent:\n${c.text.slice(0, 400)}`).join("\n\n");
+    const previewLines = batch.map((c, idx) => `[${idx}] Title: "${c.title}"\nContent:\n${c.text.slice(0, 400)}`).join("\n\n");
 
     const prompt = [
       "Below are text chunks from a document. Each has a current title (extracted from headings, may be generic like 'Overview').",
       "Generate a concise Vietnamese title (5-10 words) for EACH chunk that captures its SPECIFIC topic.",
       "If the existing title is already specific and accurate, keep it.",
       "If the existing title is generic (e.g. 'Overview') or missing context, replace it.",
-      "Return a JSON array of objects with fields: index (number) and title (string).",
+      "Return a JSON array of objects with fields: index (number, relative to this batch starting at 0) and title (string).",
       "Return ONLY the JSON array, no other text.",
       "",
       "Chunks:",
@@ -790,6 +790,8 @@ async function callGemini({ question, history, apiKey: requestApiKey, tenantId =
     ragContext = uploadedDocs.map((doc) => `### ${doc.title}\n${doc.markdown}`).join("\n\n");
   }
 
+   ragContext = truncateToTokenBudget(ragContext, config.RAG_TOKEN_BUDGET);
+
   const fullContext = [wikiContext, ragContext].filter(Boolean).join("\n\n");
   if (!fullContext.trim()) {
     throw new Error("No documents are available yet. Please upload a file or add .md files to wiki/default/");
@@ -845,6 +847,7 @@ async function callGemini({ question, history, apiKey: requestApiKey, tenantId =
 
 async function handleUpload(req, res) {
   const contentType = String(req.headers["content-type"] || "");
+  const requestApiKey = String(req.headers["x-api-key"] || "").trim();
   let filename = "";
   let markdown = "";
 
@@ -887,7 +890,7 @@ async function handleUpload(req, res) {
 
   let indexingStatus = "not_indexed";
   try {
-    const apiKey = process.env.GEMINI_API_KEY || "";
+    const apiKey = requestApiKey || process.env.GEMINI_API_KEY || "";
     if (apiKey) {
       await generateChunkTitles(chunks, apiKey);
       await indexDocumentChunks(chunks, safeFilename, safeTitle, id, "default", apiKey);
@@ -903,37 +906,32 @@ async function handleUpload(req, res) {
   } catch {}
 
   return sendJson(res, 201, {
-    document: {
-      ...entry,
-      markdown,
-    },
+    document: entry,
     indexingStatus,
   });
 }
 
 async function handleDocuments(_req, res) {
-  const docs = await loadAllDocumentsWithMarkdown();
+  const docs = await readIndex();
 
   let chunkCounts = {};
   try {
     chunkCounts = await getDocChunkCounts();
   } catch {}
 
-  for (const doc of docs) {
-    doc.chunkCount = chunkCounts[doc.id] || doc.chunkCount || 0;
-  }
-
-  const index = await readIndex();
   let updated = false;
   for (const doc of docs) {
-    const entry = index.find((e) => e.id === doc.id);
-    if (entry && entry.chunkCount !== doc.chunkCount) {
-      entry.chunkCount = doc.chunkCount;
+    const nextChunkCount = chunkCounts[doc.id] || doc.chunkCount || 0;
+    if (doc.chunkCount !== nextChunkCount) {
+      doc.chunkCount = nextChunkCount;
       updated = true;
     }
+    doc.filename = repairTextEncoding(doc.filename);
+    doc.title = repairTextEncoding(doc.title);
   }
+
   if (updated) {
-    await writeIndex(index);
+    await writeIndex(docs);
   }
 
   return sendJson(res, 200, { documents: docs });

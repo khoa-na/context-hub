@@ -220,9 +220,11 @@ uploadButton.addEventListener("click", async () => {
   try {
     const formData = new FormData();
     formData.append("file", file);
+    const apiKey = apiKeyInput.value.trim() || sessionApiKey;
 
     const response = await fetch("/api/upload", {
       method: "POST",
+      headers: apiKey ? { "x-api-key": apiKey } : undefined,
       body: formData,
     });
 
@@ -232,7 +234,14 @@ uploadButton.addEventListener("click", async () => {
       throw new Error(payload.error || "Upload failed.");
     }
 
-    uploadStatus.textContent = `Indexed ${payload.document.filename} (${payload.document.chunkCount} chunks)`;
+    if (payload.indexingStatus === "indexed") {
+      uploadStatus.textContent = `Indexed ${payload.document.filename} (${payload.document.chunkCount} chunks)`;
+    } else if (payload.indexingStatus === "failed") {
+      uploadStatus.textContent = `Uploaded ${payload.document.filename}, but indexing failed.`;
+    } else {
+      uploadStatus.textContent = `Uploaded ${payload.document.filename}, but it was not indexed yet.`;
+    }
+
     await loadDocuments();
     resetConversation();
     fileInput.value = "";
@@ -340,10 +349,6 @@ chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const question = chatInput.value.trim();
-  if (!state.documents.length) {
-    renderChatMessage("assistant", "Please upload at least one document first.");
-    return;
-  }
   if (!question) return;
 
   renderChatMessage("user", question);
