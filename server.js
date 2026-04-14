@@ -1,9 +1,12 @@
+require("dotenv").config();
 const http = require("http");
 const fs = require("fs/promises");
 const path = require("path");
+const config = require("./config");
 const crypto = require("crypto");
 const Busboy = require("busboy");
 const mammoth = require("mammoth");
+const { indexDocumentChunks, hybridSearch, createIndexes, getChunkCount } = require("./db");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
@@ -69,6 +72,40 @@ async function readIndex() {
 
 async function writeIndex(entries) {
   await fs.writeFile(INDEX_PATH, `${JSON.stringify(entries, null, 2)}\n`, "utf8");
+}
+
+function truncateToTokenBudget(text, tokenBudget) {
+  // Approximate: 1 token = 4 chars
+  const charLimit = tokenBudget * 4;
+  if (text.length > charLimit) {
+    return text.slice(0, charLimit) + "\n\n[...TRUNCATED DUE TO TOKEN BUDGET...]";
+  }
+  return text;
+}
+
+async function loadWikiContext(tenantId) {
+  const wikiPath = path.join(config.WIKI_DIR, tenantId);
+  try {
+    await fs.access(wikiPath);
+  } catch {
+    return "";
+  }
+
+  try {
+    const files = await fs.readdir(wikiPath);
+    const mdFiles = files.filter(f => f.endsWith('.md'));
+    let context = "";
+
+    for (const file of mdFiles) {
+       const content = await fs.readFile(path.join(wikiPath, file), "utf8");
+       context += `\n\n### ${file}\n${content}`;
+    }
+
+    return truncateToTokenBudget(context, config.WIKI_TOKEN_BUDGET);
+  } catch (err) {
+    console.error("Error loading wiki context:", err);
+    return "";
+  }
 }
 
 function sendJson(res, statusCode, payload) {
@@ -401,7 +438,7 @@ function splitIntoChunks(markdown) {
     for (const paragraph of paragraphs) {
       const candidate = chunkText ? `${chunkText}\n\n${paragraph}` : paragraph;
       if (candidate.length > 1200 && chunkText) {
-        chunks.push({ id: `C${counter++}`, title: section.title, text: chunkText.trim() });
+        chunks.push({ id: `C${counter++}`, title: section.title, text: chunkText.trim(), parentText: section.text.trim() });
         chunkText = paragraph;
       } else {
         chunkText = candidate;
@@ -409,11 +446,11 @@ function splitIntoChunks(markdown) {
     }
 
     if (chunkText) {
-      chunks.push({ id: `C${counter++}`, title: section.title, text: chunkText.trim() });
+      chunks.push({ id: `C${counter++}`, title: section.title, text: chunkText.trim(), parentText: section.text.trim() });
     }
   }
 
-  return chunks.length ? chunks : [{ id: "C1", title: "Overview", text: normalized }];
+  return chunks.length ? chunks : [{ id: "C1", title: "Overview", text: normalized, parentText: normalized }];
 }
 
 function scoreChunk(question, chunk) {
@@ -435,17 +472,26 @@ function scoreChunk(question, chunk) {
 
 async function loadAllDocumentsWithMarkdown() {
   const index = await readIndex();
-  return Promise.all(
+  const results = await Promise.all(
     index.map(async (entry) => {
-      const markdown = await fs.readFile(path.join(ROOT, entry.markdownPath), "utf8");
-      return {
-        ...entry,
-        filename: repairTextEncoding(entry.filename),
-        title: repairTextEncoding(entry.title),
-        markdown,
-      };
+      try {
+        const markdown = await fs.readFile(path.join(ROOT, entry.markdownPath), "utf8");
+        return {
+          ...entry,
+          filename: repairTextEncoding(entry.filename),
+          title: repairTextEncoding(entry.title),
+          markdown,
+        };
+      } catch {
+        return null;
+      }
     })
   );
+  const valid = results.filter(Boolean);
+  if (valid.length < index.length) {
+    await writeIndex(valid);
+  }
+  return valid;
 }
 
 function extractOutputText(response) {
@@ -544,6 +590,69 @@ function sanitizeModelAnswer(answer) {
   return normalized;
 }
 
+async function generateChunkTitles(chunks, apiKey) {
+  if (!apiKey || !chunks.length) {
+    return chunks;
+  }
+
+  const BATCH_SIZE = 10;
+  const model = process.env.GEMINI_MODEL || "gemma-4-31b-it";
+
+  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+    const batch = chunks.slice(i, i + BATCH_SIZE);
+    const previewLines = batch.map((c, idx) => `[${i + idx}] Title: "${c.title}"\nContent:\n${c.text.slice(0, 400)}`).join("\n\n");
+
+    const prompt = [
+      "Below are text chunks from a document. Each has a current title (extracted from headings, may be generic like 'Overview').",
+      "Generate a concise Vietnamese title (5-10 words) for EACH chunk that captures its SPECIFIC topic.",
+      "If the existing title is already specific and accurate, keep it.",
+      "If the existing title is generic (e.g. 'Overview') or missing context, replace it.",
+      "Return a JSON array of objects with fields: index (number) and title (string).",
+      "Return ONLY the JSON array, no other text.",
+      "",
+      "Chunks:",
+      previewLines,
+    ].join("\n");
+
+    try {
+      const payload = await postGeminiGenerateContent({
+        apiKey,
+        model,
+        prompt,
+        maxOutputTokens: 1024,
+        structuredOutput: true,
+      });
+
+      const rawText = extractGeminiText(payload);
+      const answer = extractAnswerFromStructuredText(rawText) || rawText;
+
+      let titles;
+      try {
+        const jsonMatch = answer.match(/\[[\s\S]*\]/);
+        titles = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(answer);
+      } catch {
+        continue;
+      }
+
+      if (!Array.isArray(titles)) {
+        continue;
+      }
+
+      for (const item of titles) {
+        const idx = typeof item.index === "number" ? item.index : null;
+        const newTitle = typeof item.title === "string" ? item.title.trim() : null;
+        if (idx !== null && newTitle && i + idx < chunks.length) {
+          chunks[i + idx].title = newTitle;
+        }
+      }
+    } catch (err) {
+      console.error("Chunk title generation failed:", err.message);
+    }
+  }
+
+  return chunks;
+}
+
 function buildGeminiSystemInstruction() {
   return [
     "Return only the final answer for the user.",
@@ -558,11 +667,7 @@ function buildGeminiSystemInstruction() {
   ].join("\n");
 }
 
-function buildGeminiUserPrompt({ question, selectedChunks, history }) {
-  const context = selectedChunks
-    .map((chunk) => `[${chunk.id}] ${chunk.title}\n${chunk.text}`)
-    .join("\n\n---\n\n");
-
+function buildGeminiUserPrompt({ question, wikiContext, history }) {
   const historyLines = (history || [])
     .slice(-4)
     .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
@@ -570,8 +675,8 @@ function buildGeminiUserPrompt({ question, selectedChunks, history }) {
 
   return [
     historyLines ? `Conversation so far:\n${historyLines}` : "",
-    `Question:\n${question}`,
-    `Context:\n${context}`,
+    `=== COMPANY KNOWLEDGE ===\n${wikiContext}`,
+    `=== QUESTION ===\n${question}`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -660,32 +765,37 @@ async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputToken
   return payload;
 }
 
-async function callGemini({ question, documents, history, apiKey: requestApiKey }) {
+async function callGemini({ question, history, apiKey: requestApiKey, tenantId = "default" }) {
   const apiKey = requestApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("Missing Gemini API key. Add GEMINI_API_KEY to the environment or paste a key into the app.");
   }
 
-  const allChunks = documents.flatMap((document) =>
-    splitIntoChunks(document.markdown).map((chunk) => ({
-      ...chunk,
-      title: `${document.title} · ${chunk.title}`,
-      documentId: document.id,
-      documentTitle: document.title,
-      filename: document.filename,
-    }))
-  );
+  const wikiContext = await loadWikiContext(tenantId);
 
-  if (!allChunks.length) {
-    throw new Error("No uploaded documents are available yet.");
+  let ragChunks = [];
+  try {
+    ragChunks = await hybridSearch(question, tenantId, apiKey, 5);
+  } catch (err) {
+    console.error("Hybrid search failed, falling back to full context:", err.message);
   }
 
-  const rankedChunks = [...allChunks]
-    .sort((left, right) => scoreChunk(question, right) - scoreChunk(question, left))
-    .slice(0, 6);
+  let ragContext = "";
+  if (ragChunks.length > 0) {
+    ragContext = ragChunks
+      .map((chunk) => `[${chunk.id}] (${chunk.title || chunk.filename})\n${chunk.content}`)
+      .join("\n\n---\n\n");
+  } else {
+    const uploadedDocs = await loadAllDocumentsWithMarkdown();
+    ragContext = uploadedDocs.map((doc) => `### ${doc.title}\n${doc.markdown}`).join("\n\n");
+  }
+
+  const fullContext = [wikiContext, ragContext].filter(Boolean).join("\n\n");
+  if (!fullContext.trim()) {
+    throw new Error("No documents are available yet. Please upload a file or add .md files to wiki/default/");
+  }
 
   const model = process.env.GEMINI_MODEL || "gemma-4-31b-it";
-  let selectedChunks = rankedChunks;
   let payload;
   let structuredOutput = true;
 
@@ -693,7 +803,7 @@ async function callGemini({ question, documents, history, apiKey: requestApiKey 
     payload = await postGeminiGenerateContent({
       apiKey,
       model,
-      prompt: buildGeminiUserPrompt({ question, selectedChunks, history }),
+      prompt: buildGeminiUserPrompt({ question, wikiContext: fullContext, history }),
       maxOutputTokens: 700,
       structuredOutput,
     });
@@ -707,25 +817,12 @@ async function callGemini({ question, documents, history, apiKey: requestApiKey 
       payload = await postGeminiGenerateContent({
         apiKey,
         model,
-        prompt: buildGeminiUserPrompt({ question, selectedChunks, history }),
+        prompt: buildGeminiUserPrompt({ question, wikiContext: fullContext, history }),
         maxOutputTokens: 700,
         structuredOutput,
       });
     } else {
-    const shouldRetry = error.statusCode >= 500 || /internal error/i.test(error.message);
-    if (!shouldRetry) {
       throw error;
-    }
-
-    // Retry once with a smaller prompt because hosted Gemma can be sensitive to larger contexts.
-    selectedChunks = rankedChunks.slice(0, 3);
-    payload = await postGeminiGenerateContent({
-      apiKey,
-      model,
-      prompt: buildGeminiUserPrompt({ question, selectedChunks, history: [] }),
-      maxOutputTokens: 500,
-      structuredOutput: false,
-    });
     }
   }
 
@@ -742,13 +839,7 @@ async function callGemini({ question, documents, history, apiKey: requestApiKey 
 
   return {
     answer,
-    chunks: selectedChunks.map((chunk) => ({
-      id: chunk.id,
-      title: chunk.title,
-      documentTitle: chunk.documentTitle,
-      filename: chunk.filename,
-      preview: chunk.text.slice(0, 180),
-    })),
+    chunks: ragChunks,
   };
 }
 
@@ -776,12 +867,12 @@ async function handleUpload(req, res) {
   const id = `${slugify(path.basename(filename, path.extname(filename)))}-${crypto.randomUUID().slice(0, 8)}`;
   const createdAt = new Date().toISOString();
   const filePath = path.join(DOCS_DIR, `${id}.md`);
-  const chunks = splitIntoChunks(markdown);
   const safeFilename = repairTextEncoding(filename);
   const safeTitle = repairTextEncoding(path.basename(filename, path.extname(filename)));
 
   await fs.writeFile(filePath, markdown, "utf8");
 
+  const chunks = splitIntoChunks(markdown);
   const index = await readIndex();
   const entry = {
     id,
@@ -794,11 +885,29 @@ async function handleUpload(req, res) {
   index.unshift(entry);
   await writeIndex(index);
 
+  let indexingStatus = "not_indexed";
+  try {
+    const apiKey = process.env.GEMINI_API_KEY || "";
+    if (apiKey) {
+      await generateChunkTitles(chunks, apiKey);
+      await indexDocumentChunks(chunks, safeFilename, safeTitle, id, "default", apiKey);
+      indexingStatus = "indexed";
+    }
+  } catch (err) {
+    console.error("Embedding indexing failed:", err.message);
+    indexingStatus = "failed";
+  }
+
+  try {
+    await createIndexes();
+  } catch {}
+
   return sendJson(res, 201, {
     document: {
       ...entry,
       markdown,
     },
+    indexingStatus,
   });
 }
 
@@ -818,16 +927,18 @@ async function handleChat(req, res) {
     return sendJson(res, 400, { error: "question is required." });
   }
 
-  const documents = await loadAllDocumentsWithMarkdown();
-  if (!documents.length) {
-    return sendJson(res, 400, { error: "Upload at least one document before chatting." });
-  }
-
-  const result = await callGemini({ question, documents, history, apiKey });
+  const result = await callGemini({ question, history, apiKey, tenantId: "default" });
 
   return sendJson(res, 200, {
     answer: result.answer,
-    chunks: result.chunks,
+    chunks: result.chunks.map((chunk) => ({
+      id: chunk.id,
+      title: chunk.title,
+      filename: chunk.filename,
+      content: chunk.content,
+      childContent: chunk.childContent || "",
+      score: chunk.score,
+    })),
   });
 }
 
@@ -850,6 +961,41 @@ async function serveStatic(req, res, pathname) {
   }
 }
 
+async function handleReindex(req, res) {
+  const body = await parseJson(req);
+  const apiKey = String(body.apiKey || "").trim() || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return sendJson(res, 400, { error: "API key required for reindexing." });
+  }
+
+  const docs = await loadAllDocumentsWithMarkdown();
+  let totalChunks = 0;
+  const results = [];
+
+  for (const doc of docs) {
+    try {
+      await removeDocumentChunks(doc.id);
+    } catch {}
+    try {
+      const chunks = splitIntoChunks(doc.markdown);
+      await generateChunkTitles(chunks, apiKey);
+      await indexDocumentChunks(chunks, doc.filename, doc.title, doc.id, "default", apiKey);
+      totalChunks += chunks.length;
+      results.push({ id: doc.id, chunks: chunks.length, status: "ok" });
+    } catch (err) {
+      results.push({ id: doc.id, status: "failed", error: err.message });
+    }
+  }
+
+  try {
+    await createIndexes();
+  } catch (err) {
+    console.error("Index creation failed after reindex:", err.message);
+  }
+
+  return sendJson(res, 200, { reindexed: results.length, totalChunks, results });
+}
+
 async function router(req, res) {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -866,6 +1012,10 @@ async function router(req, res) {
       return await handleChat(req, res);
     }
 
+    if (req.method === "POST" && url.pathname === "/api/reindex") {
+      return await handleReindex(req, res);
+    }
+
     if (req.method === "GET") {
       return await serveStatic(req, res, url.pathname);
     }
@@ -877,8 +1027,51 @@ async function router(req, res) {
   }
 }
 
+async function autoIndexUnindexedDocs() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.log("[auto-index] No GEMINI_API_KEY, skipping auto-index.");
+    return;
+  }
+
+  const chunkCount = await getChunkCount();
+  if (chunkCount > 0) {
+    console.log(`[auto-index] LanceDB already has ${chunkCount} chunks, skipping.`);
+    return;
+  }
+
+  const docs = await loadAllDocumentsWithMarkdown();
+  if (!docs.length) {
+    console.log("[auto-index] No documents found, skipping.");
+    return;
+  }
+
+  console.log(`[auto-index] Found ${docs.length} document(s) without embeddings. Indexing...`);
+
+  for (const doc of docs) {
+    try {
+      const chunks = splitIntoChunks(doc.markdown);
+      await generateChunkTitles(chunks, apiKey);
+      await indexDocumentChunks(chunks, doc.filename, doc.title, doc.id, "default", apiKey);
+      console.log(`[auto-index] Indexed "${doc.filename}" (${chunks.length} chunks)`);
+    } catch (err) {
+      console.error(`[auto-index] Failed to index "${doc.filename}":`, err.message);
+    }
+  }
+
+  try {
+    await createIndexes();
+    console.log("[auto-index] Indexes created.");
+  } catch (err) {
+    console.error("[auto-index] Index creation failed:", err.message);
+  }
+
+  console.log("[auto-index] Done.");
+}
+
 async function start() {
   await ensureStorage();
+  await autoIndexUnindexedDocs();
 
   const server = http.createServer(router);
   server.listen(PORT, () => {

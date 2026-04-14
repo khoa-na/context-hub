@@ -337,6 +337,29 @@ input {
   margin: 6px 0 0;
 }
 
+.source-file {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.source-item details {
+  margin-top: 6px;
+}
+
+.source-item summary {
+  font-size: 0.82rem;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.source-item details p {
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 8px;
+  border-radius: 8px;
+}
+
 @media (max-width: 1120px) {
   .layout,
   .hero {

@@ -74,9 +74,16 @@ function renderSources(chunks) {
     .map(
       (chunk) => `
         <article class="source-item">
-          <strong>${escapeHtml(chunk.id)} · ${escapeHtml(chunk.documentTitle || "Document")} · ${escapeHtml(chunk.title)}</strong>
-          <p>${escapeHtml(chunk.filename || "")}</p>
-          <p>${escapeHtml(chunk.preview)}...</p>
+          <strong>${escapeHtml(chunk.id)} · ${escapeHtml(chunk.title)}</strong>
+          <p class="source-file">${escapeHtml(chunk.filename || "")}</p>
+          <details>
+            <summary>Matched passage</summary>
+            <p>${escapeHtml((chunk.childContent || "").slice(0, 300))}</p>
+          </details>
+          <details>
+            <summary>Full section context</summary>
+            <p>${escapeHtml((chunk.content || "").slice(0, 600))}</p>
+          </details>
         </article>
       `
     )

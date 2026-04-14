@@ -1,0 +1,50 @@
+[
+  {
+    "id": "erp-huong-dan-su-dung-a1b2c3d4",
+    "filename": "Hướng dẫn sử dụng ERP.md",
+    "title": "Hướng dẫn sử dụng ERP",
+    "markdownPath": "data/documents/erp-huong-dan-su-dung-a1b2c3d4.md",
+    "createdAt": "2026-04-14T00:00:00.000Z",
+    "chunkCount": 0
+  },
+  {
+    "id": "quan-ly-du-an-noi-bo-f5e6g7h8",
+    "filename": "Quản lý dự án nội bộ.md",
+    "title": "Quản lý dự án nội bộ",
+    "markdownPath": "data/documents/quan-ly-du-an-noi-bo-f5e6g7h8.md",
+    "createdAt": "2026-04-14T00:00:01.000Z",
+    "chunkCount": 0
+  },
+  {
+    "id": "bang-luong-phuc-loi-i9j0k1l2",
+    "filename": "Bảng lương và phúc lợi.md",
+    "title": "Bảng lương và phúc lợi",
+    "markdownPath": "data/documents/bang-luong-phuc-loi-i9j0k1l2.md",
+    "createdAt": "2026-04-14T00:00:02.000Z",
+    "chunkCount": 0
+  },
+  {
+    "id": "huong-dan-claude-d2ad5b48",
+    "filename": "hướng dẫn claude.html",
+    "title": "hướng dẫn claude",
+    "markdownPath": "data/documents/huong-dan-claude-d2ad5b48.md",
+    "createdAt": "2026-04-13T01:54:38.830Z",
+    "chunkCount": 1
+  },
+  {
+    "id": "bao-cao-so-sanh-cac-mo-hinh-ngon-ngu-lon-e579e133",
+    "filename": "BÁO CÁO SO SÁNH CÁC MÔ HÌNH NGÔN NGỮ LỚN.docx",
+    "title": "BÁO CÁO SO SÁNH CÁC MÔ HÌNH NGÔN NGỮ LỚN",
+    "markdownPath": "data/documents/bao-cao-so-sanh-cac-mo-hinh-ngon-ngu-lon-e579e133.md",
+    "createdAt": "2026-04-13T01:44:08.853Z",
+    "chunkCount": 1
+  },
+  {
+    "id": "weha-mind-os-4d49c3da",
+    "filename": "WEHA Mind os.docx",
+    "title": "WEHA Mind os",
+    "markdownPath": "data/documents/weha-mind-os-4d49c3da.md",
+    "createdAt": "2026-04-10T07:00:57.281Z",
+    "chunkCount": 39
+  }
+]
