@@ -6,7 +6,7 @@ const config = require("./config");
 const crypto = require("crypto");
 const Busboy = require("busboy");
 const mammoth = require("mammoth");
-const { indexDocumentChunks, hybridSearch, createIndexes, getChunkCount } = require("./db");
+const { indexDocumentChunks, hybridSearch, createIndexes, getChunkCount, getIndexedDocIds } = require("./db");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
@@ -996,6 +996,58 @@ async function handleReindex(req, res) {
   return sendJson(res, 200, { reindexed: results.length, totalChunks, results });
 }
 
+async function handleWikiUpload(req, res) {
+  const contentType = String(req.headers["content-type"] || "");
+  let filename = "";
+  let content = "";
+
+  if (contentType.includes("multipart/form-data")) {
+    const upload = await parseMultipartFile(req);
+    filename = upload.filename;
+    content = upload.buffer.toString("utf8");
+  } else {
+    const body = await parseJson(req);
+    filename = String(body.filename || "").trim();
+    content = typeof body.text === "string" ? body.text : "";
+
+    if (!filename || !content.trim()) {
+      return sendJson(res, 400, { error: "filename and text are required." });
+    }
+  }
+
+  if (!filename.endsWith(".md")) {
+    filename = filename.replace(/\.[^.]+$/, "") + ".md";
+  }
+
+  const safeName = slugify(path.basename(filename, path.extname(filename))) + ".md";
+  const wikiDir = path.join(config.WIKI_DIR, "default");
+
+  await fs.mkdir(wikiDir, { recursive: true });
+  const filePath = path.join(wikiDir, safeName);
+  await fs.writeFile(filePath, content, "utf8");
+
+  return sendJson(res, 201, {
+    filename: safeName,
+    path: `wiki/default/${safeName}`,
+    size: content.length,
+  });
+}
+
+async function handleWikiList(_req, res) {
+  const wikiDir = path.join(config.WIKI_DIR, "default");
+  let files = [];
+  try {
+    const entries = await fs.readdir(wikiDir);
+    for (const entry of entries) {
+      if (!entry.endsWith(".md")) continue;
+      const stat = await fs.stat(path.join(wikiDir, entry));
+      files.push({ filename: entry, size: stat.size, modified: stat.mtime.toISOString() });
+    }
+  } catch {}
+
+  return sendJson(res, 200, { files });
+}
+
 async function router(req, res) {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -1006,6 +1058,14 @@ async function router(req, res) {
 
     if (req.method === "POST" && url.pathname === "/api/upload") {
       return await handleUpload(req, res);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/wiki-upload") {
+      return await handleWikiUpload(req, res);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/wiki-list") {
+      return await handleWikiList(req, res);
     }
 
     if (req.method === "POST" && url.pathname === "/api/chat") {
@@ -1034,21 +1094,23 @@ async function autoIndexUnindexedDocs() {
     return;
   }
 
-  const chunkCount = await getChunkCount();
-  if (chunkCount > 0) {
-    console.log(`[auto-index] LanceDB already has ${chunkCount} chunks, skipping.`);
-    return;
-  }
-
   const docs = await loadAllDocumentsWithMarkdown();
   if (!docs.length) {
     console.log("[auto-index] No documents found, skipping.");
     return;
   }
 
-  console.log(`[auto-index] Found ${docs.length} document(s) without embeddings. Indexing...`);
+  const indexedDocIds = await getIndexedDocIds();
+  const unindexedDocs = docs.filter((doc) => !indexedDocIds.includes(doc.id));
 
-  for (const doc of docs) {
+  if (!unindexedDocs.length) {
+    console.log(`[auto-index] All ${docs.length} document(s) already indexed, skipping.`);
+    return;
+  }
+
+  console.log(`[auto-index] Found ${unindexedDocs.length} unindexed document(s) out of ${docs.length} total. Indexing...`);
+
+  for (const doc of unindexedDocs) {
     try {
       const chunks = splitIntoChunks(doc.markdown);
       await generateChunkTitles(chunks, apiKey);

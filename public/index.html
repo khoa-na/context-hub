@@ -71,6 +71,29 @@
           <button id="upload-button" class="primary-button" type="button" disabled>Convert to Markdown</button>
           <p id="upload-status" class="status-line"></p>
 
+          <div class="panel-head compact">
+            <h2>Wiki files (always included in context)</h2>
+            <p>Upload .md files to the wiki folder. These are always sent to the model, not retrieved via search.</p>
+          </div>
+
+          <label class="upload-dropzone" for="wiki-file-input">
+            <input
+              id="wiki-file-input"
+              type="file"
+              accept=".md,.txt,.text"
+            />
+            <button id="wiki-pick-button" class="secondary-button" type="button">Choose wiki file</button>
+            <span id="wiki-file-name">No file selected yet</span>
+            <small>Only .md and .txt files. Content is saved as-is into <code>wiki/default/</code>.</small>
+          </label>
+
+          <button id="wiki-upload-button" class="primary-button" type="button" disabled>Upload to Wiki</button>
+          <p id="wiki-upload-status" class="status-line"></p>
+
+          <div class="wiki-list-wrap">
+            <div id="wiki-list" class="document-list"></div>
+          </div>
+
           <div class="document-list-wrap">
             <div class="panel-head compact">
               <h2>2. Documents</h2>

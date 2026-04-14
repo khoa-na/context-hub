@@ -240,8 +240,92 @@ apiKeyInput.addEventListener("keydown", (event) => {
   }
 });
 
+const wikiFileInput = document.querySelector("#wiki-file-input");
+const wikiPickButton = document.querySelector("#wiki-pick-button");
+const wikiFileName = document.querySelector("#wiki-file-name");
+const wikiUploadButton = document.querySelector("#wiki-upload-button");
+const wikiUploadStatus = document.querySelector("#wiki-upload-status");
+const wikiList = document.querySelector("#wiki-list");
+
+function updateWikiFileUI() {
+  const file = wikiFileInput.files[0];
+  if (!file) {
+    wikiFileName.textContent = "No file selected yet";
+    wikiUploadButton.disabled = true;
+    return;
+  }
+  wikiFileName.textContent = `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB`;
+  wikiUploadButton.disabled = false;
+}
+
+async function loadWikiFiles() {
+  try {
+    const response = await fetch("/api/wiki-list");
+    const payload = await response.json();
+    const files = payload.files || [];
+    if (!files.length) {
+      wikiList.innerHTML = '<p class="empty-state">No wiki files yet.</p>';
+      return;
+    }
+    wikiList.innerHTML = files.map((f) => `
+      <article class="doc-card">
+        <span class="doc-title">${escapeHtml(f.filename)}</span>
+        <span class="doc-meta">${Math.max(1, Math.round(f.size / 1024))} KB · ${new Date(f.modified).toLocaleDateString()}</span>
+      </article>
+    `).join("");
+  } catch {
+    wikiList.innerHTML = '<p class="empty-state">Could not load wiki files.</p>';
+  }
+}
+
+wikiPickButton.addEventListener("click", () => {
+  wikiFileInput.click();
+});
+
+wikiFileInput.addEventListener("change", () => {
+  wikiUploadStatus.textContent = "";
+  updateWikiFileUI();
+});
+
+wikiUploadButton.addEventListener("click", async () => {
+  const file = wikiFileInput.files[0];
+  if (!file) {
+    wikiUploadStatus.textContent = "Choose a file first.";
+    return;
+  }
+
+  wikiUploadButton.disabled = true;
+  wikiUploadStatus.textContent = "Uploading...";
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch("/api/wiki-upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const raw = await response.text();
+    const payload = raw ? JSON.parse(raw) : {};
+    if (!response.ok) {
+      throw new Error(payload.error || "Upload failed.");
+    }
+
+    wikiUploadStatus.textContent = `Saved to wiki: ${payload.filename}`;
+    await loadWikiFiles();
+    wikiFileInput.value = "";
+    updateWikiFileUI();
+  } catch (error) {
+    wikiUploadStatus.textContent = error.message;
+  } finally {
+    updateWikiFileUI();
+  }
+});
+
 hydrateApiKey();
 updateSelectedFileUI();
 loadDocuments().catch((error) => {
   uploadStatus.textContent = error.message;
 });
+loadWikiFiles();

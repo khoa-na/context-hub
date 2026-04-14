@@ -224,6 +224,20 @@ async function removeDocumentChunks(docId) {
   }
 }
 
+async function getIndexedDocIds() {
+  const table = await getTable();
+  try {
+    const results = await table
+      .query()
+      .select(["docId"])
+      .limit(10000)
+      .toArray();
+    return [...new Set(results.map((r) => r.docId))];
+  } catch {
+    return [];
+  }
+}
+
 async function getChunkCount() {
   const table = await getTable();
   try {
@@ -241,4 +255,5 @@ module.exports = {
   hybridSearch,
   removeDocumentChunks,
   getChunkCount,
+  getIndexedDocIds,
 };

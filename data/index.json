@@ -1,5 +1,29 @@
 [
   {
+    "id": "quy-dinh-lam-viec-tu-xa-m3n4o5p6",
+    "filename": "Quy định làm việc từ xa.md",
+    "title": "Quy định làm việc từ xa",
+    "markdownPath": "data/documents/quy-dinh-lam-viec-tu-xa-m3n4o5p6.md",
+    "createdAt": "2026-04-14T00:00:03.000Z",
+    "chunkCount": 0
+  },
+  {
+    "id": "so-tay-nhan-vien-moi-q7r8s9t0",
+    "filename": "Sổ tay nhân viên mới.md",
+    "title": "Sổ tay nhân viên mới",
+    "markdownPath": "data/documents/so-tay-nhan-vien-moi-q7r8s9t0.md",
+    "createdAt": "2026-04-14T00:00:04.000Z",
+    "chunkCount": 0
+  },
+  {
+    "id": "hop-dong-mau-khach-hang-u1v2w3x4",
+    "filename": "Hợp đồng mẫu với khách hàng.md",
+    "title": "Hợp đồng mẫu với khách hàng",
+    "markdownPath": "data/documents/hop-dong-mau-khach-hang-u1v2w3x4.md",
+    "createdAt": "2026-04-14T00:00:05.000Z",
+    "chunkCount": 0
+  },
+  {
     "id": "erp-huong-dan-su-dung-a1b2c3d4",
     "filename": "Hướng dẫn sử dụng ERP.md",
     "title": "Hướng dẫn sử dụng ERP",
