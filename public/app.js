@@ -4,7 +4,6 @@ const state = {
 };
 
 const fileInput = document.querySelector("#file-input");
-const pickFileButton = document.querySelector("#pick-file-button");
 const selectedFileName = document.querySelector("#selected-file-name");
 const uploadButton = document.querySelector("#upload-button");
 const uploadStatus = document.querySelector("#upload-status");
@@ -17,6 +16,16 @@ const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
 const chatLog = document.querySelector("#chat-log");
 const sourceList = document.querySelector("#source-list");
+const sourcesToggle = document.querySelector("#sources-toggle");
+const sourcesCount = document.querySelector("#sources-count");
+const settingsToggle = document.querySelector("#settings-toggle");
+const settingsPanel = document.querySelector("#settings-panel");
+const wikiFileInput = document.querySelector("#wiki-file-input");
+const wikiFileName = document.querySelector("#wiki-file-name");
+const wikiUploadButton = document.querySelector("#wiki-upload-button");
+const wikiUploadStatus = document.querySelector("#wiki-upload-status");
+const wikiList = document.querySelector("#wiki-list");
+
 let sessionApiKey = "";
 
 function escapeHtml(value) {
@@ -26,14 +35,21 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
+settingsToggle.addEventListener("click", () => {
+  settingsPanel.classList.toggle("hidden");
+});
+
+sourcesToggle.addEventListener("click", () => {
+  sourceList.classList.toggle("collapsed");
+});
+
 function updateSelectedFileUI() {
   const file = fileInput.files[0];
   if (!file) {
-    selectedFileName.textContent = "No file selected yet";
+    selectedFileName.textContent = "Drop a file or click to browse";
     uploadButton.disabled = true;
     return;
   }
-
   selectedFileName.textContent = `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB`;
   uploadButton.disabled = false;
 }
@@ -43,37 +59,41 @@ function renderDocuments() {
     documentList.innerHTML = '<p class="empty-state">No documents yet.</p>';
     return;
   }
-
   documentList.innerHTML = state.documents
-    .map((document) => {
-      return `
-        <article class="doc-card">
-          <span class="doc-title">${escapeHtml(document.title)}</span>
-          <span class="doc-meta">${escapeHtml(document.filename)} · ${document.chunkCount} chunks</span>
-        </article>
-      `;
-    })
+    .map((doc) => `
+      <div class="doc-card">
+        <span class="doc-title">${escapeHtml(doc.title)}</span>
+        <span class="doc-meta">${escapeHtml(doc.filename)} · ${doc.chunkCount} chunks</span>
+      </div>
+    `)
     .join("");
 }
 
 function renderChatMessage(role, content) {
-  const article = document.createElement("article");
-  article.className = `bubble ${role}`;
-  article.innerHTML = `<strong>${role === "assistant" ? "Assistant" : "You"}</strong><p>${escapeHtml(content)}</p>`;
-  chatLog.append(article);
+  const div = document.createElement("div");
+  div.className = `msg ${role}`;
+  div.innerHTML = `
+    <span class="msg-avatar">${role === "assistant" ? "&#9670;" : "&#128100;"}</span>
+    <div class="msg-body"><p>${escapeHtml(content)}</p></div>
+  `;
+  chatLog.append(div);
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
 function renderSources(chunks) {
   if (!chunks || !chunks.length) {
     sourceList.textContent = "No retrieval yet.";
+    sourcesToggle.classList.add("hidden");
     return;
   }
+
+  sourcesToggle.classList.remove("hidden");
+  sourcesCount.textContent = chunks.length;
 
   sourceList.innerHTML = chunks
     .map(
       (chunk) => `
-        <article class="source-item">
+        <div class="source-item">
           <strong>${escapeHtml(chunk.id)} · ${escapeHtml(chunk.title)}</strong>
           <p class="source-file">${escapeHtml(chunk.filename || "")}</p>
           <details>
@@ -84,7 +104,7 @@ function renderSources(chunks) {
             <summary>Full section context</summary>
             <p>${escapeHtml((chunk.content || "").slice(0, 600))}</p>
           </details>
-        </article>
+        </div>
       `
     )
     .join("");
@@ -93,10 +113,10 @@ function renderSources(chunks) {
 function resetConversation() {
   state.history = [];
   chatLog.innerHTML = `
-    <article class="bubble assistant">
-      <strong>Assistant</strong>
-      <p>Ask about any uploaded file. I will search across all uploaded documents.</p>
-    </article>
+    <div class="msg msg-system">
+      <span class="msg-avatar">&#9670;</span>
+      <div class="msg-body"><p>Hi! Upload a document or ask a question. I search across all your docs using hybrid retrieval.</p></div>
+    </div>
   `;
   renderSources([]);
 }
@@ -105,19 +125,18 @@ function saveApiKey() {
   const value = apiKeyInput.value.trim();
   if (!value) {
     sessionApiKey = "";
-    keyStatus.textContent = "Session key cleared. The app will fall back to `.env` if available.";
+    keyStatus.textContent = "Session key cleared.";
     return "";
   }
-
   sessionApiKey = value;
-  keyStatus.textContent = "Gemini API key saved only for this session. Reloading or closing the app will clear it.";
+  keyStatus.textContent = "Key saved for this session.";
   return value;
 }
 
 function hydrateApiKey() {
   sessionApiKey = "";
   apiKeyInput.value = "";
-  keyStatus.textContent = "No session key saved. The app will use `.env` if the server has one.";
+  keyStatus.textContent = "No session key. Server .env will be used if available.";
 }
 
 async function loadDocuments() {
@@ -135,7 +154,7 @@ uploadButton.addEventListener("click", async () => {
   }
 
   uploadButton.disabled = true;
-  uploadStatus.textContent = "Converting and saving...";
+  uploadStatus.textContent = "Converting and indexing...";
 
   try {
     const formData = new FormData();
@@ -152,7 +171,7 @@ uploadButton.addEventListener("click", async () => {
       throw new Error(payload.error || "Upload failed.");
     }
 
-    uploadStatus.textContent = `Saved ${payload.document.filename} as Markdown.`;
+    uploadStatus.textContent = `Indexed ${payload.document.filename} (${payload.document.chunkCount} chunks)`;
     await loadDocuments();
     resetConversation();
     fileInput.value = "";
@@ -162,10 +181,6 @@ uploadButton.addEventListener("click", async () => {
   } finally {
     updateSelectedFileUI();
   }
-});
-
-pickFileButton.addEventListener("click", () => {
-  fileInput.click();
 });
 
 fileInput.addEventListener("change", () => {
@@ -181,76 +196,10 @@ showKeyToggle.addEventListener("change", () => {
   apiKeyInput.type = showKeyToggle.checked ? "text" : "password";
 });
 
-chatInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    chatForm.requestSubmit();
-  }
-});
-
-chatForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-
-  const question = chatInput.value.trim();
-  if (!state.documents.length) {
-    renderChatMessage("assistant", "Please upload at least one document first.");
-    return;
-  }
-
-  if (!question) {
-    return;
-  }
-
-  renderChatMessage("user", question);
-  chatInput.value = "";
-
-  try {
-    const apiKey = apiKeyInput.value.trim() || sessionApiKey;
-
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        question,
-        history: state.history,
-        apiKey,
-      }),
-    });
-
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "Chat failed.");
-    }
-
-    state.history.push({ role: "user", content: question });
-    state.history.push({ role: "assistant", content: payload.answer });
-    renderChatMessage("assistant", payload.answer);
-    renderSources(payload.chunks);
-  } catch (error) {
-    renderChatMessage("assistant", error.message);
-  }
-});
-
-apiKeyInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    saveApiKey();
-  }
-});
-
-const wikiFileInput = document.querySelector("#wiki-file-input");
-const wikiPickButton = document.querySelector("#wiki-pick-button");
-const wikiFileName = document.querySelector("#wiki-file-name");
-const wikiUploadButton = document.querySelector("#wiki-upload-button");
-const wikiUploadStatus = document.querySelector("#wiki-upload-status");
-const wikiList = document.querySelector("#wiki-list");
-
 function updateWikiFileUI() {
   const file = wikiFileInput.files[0];
   if (!file) {
-    wikiFileName.textContent = "No file selected yet";
+    wikiFileName.textContent = "Drop .md or .txt";
     wikiUploadButton.disabled = true;
     return;
   }
@@ -268,19 +217,15 @@ async function loadWikiFiles() {
       return;
     }
     wikiList.innerHTML = files.map((f) => `
-      <article class="doc-card">
+      <div class="doc-card">
         <span class="doc-title">${escapeHtml(f.filename)}</span>
         <span class="doc-meta">${Math.max(1, Math.round(f.size / 1024))} KB · ${new Date(f.modified).toLocaleDateString()}</span>
-      </article>
+      </div>
     `).join("");
   } catch {
     wikiList.innerHTML = '<p class="empty-state">Could not load wiki files.</p>';
   }
 }
-
-wikiPickButton.addEventListener("click", () => {
-  wikiFileInput.click();
-});
 
 wikiFileInput.addEventListener("change", () => {
   wikiUploadStatus.textContent = "";
@@ -323,9 +268,61 @@ wikiUploadButton.addEventListener("click", async () => {
   }
 });
 
+chatInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    chatForm.requestSubmit();
+  }
+});
+
+chatForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const question = chatInput.value.trim();
+  if (!state.documents.length) {
+    renderChatMessage("assistant", "Please upload at least one document first.");
+    return;
+  }
+  if (!question) return;
+
+  renderChatMessage("user", question);
+  chatInput.value = "";
+  chatInput.style.height = "auto";
+
+  try {
+    const apiKey = apiKeyInput.value.trim() || sessionApiKey;
+
+    renderChatMessage("assistant", "Thinking...");
+
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, history: state.history, apiKey }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Chat failed.");
+    }
+
+    const lastMsg = chatLog.querySelector(".msg:last-child .msg-body p");
+    if (lastMsg) lastMsg.textContent = payload.answer;
+
+    state.history.push({ role: "user", content: question });
+    state.history.push({ role: "assistant", content: payload.answer });
+    renderSources(payload.chunks);
+  } catch (error) {
+    const lastMsg = chatLog.querySelector(".msg:last-child .msg-body p");
+    if (lastMsg) lastMsg.textContent = error.message;
+  }
+});
+
+chatInput.addEventListener("input", () => {
+  chatInput.style.height = "auto";
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 160) + "px";
+});
+
 hydrateApiKey();
 updateSelectedFileUI();
-loadDocuments().catch((error) => {
-  uploadStatus.textContent = error.message;
-});
+loadDocuments().catch((error) => { uploadStatus.textContent = error.message; });
 loadWikiFiles();

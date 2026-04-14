@@ -3,135 +3,99 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LLM Wiki Starter</title>
+    <title>llm-wiki</title>
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <div class="page-shell">
-      <header class="hero">
-        <div>
-          <p class="eyebrow">LLM Wiki Starter</p>
-          <h1>Upload a file, turn it into Markdown, then ask grounded questions.</h1>
-          <p class="hero-copy">
-            This starter keeps things intentionally small: upload a text-based file, store a Markdown version, and run document Q&A through the Google Gemini API.
-          </p>
+    <nav class="navbar">
+      <div class="navbar-inner">
+        <div class="navbar-brand">
+          <span class="logo-icon">&#9670;</span> llm-wiki
         </div>
-        <div class="hero-card">
-          <p>Supported in this version</p>
-          <ul>
-            <li>.txt, .md, .json</li>
-            <li>.csv, .tsv, .html, .docx</li>
-            <li>source code files like .js, .ts, .py</li>
-          </ul>
+        <div class="navbar-actions">
+          <button id="settings-toggle" class="nav-btn" type="button">
+            <span class="btn-icon">&#9881;</span> API Key
+          </button>
         </div>
-      </header>
+      </div>
+    </nav>
 
-      <main class="layout">
-        <section class="panel upload-panel">
-          <div class="panel-head">
-            <h2>Gemini Settings</h2>
-            <p>Paste your API key here to use the app without editing `.env`. It is kept only in the current session.</p>
-          </div>
-
-          <div class="settings-card">
-            <label class="field-label" for="api-key-input">Gemini API key</label>
-            <div class="inline-field">
-              <input
-                id="api-key-input"
-                type="password"
-                placeholder="AIza..."
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <button id="save-key-button" class="secondary-button" type="button">Save key</button>
-            </div>
-            <label class="checkbox-row">
-              <input id="show-key-toggle" type="checkbox" />
-              <span>Show key</span>
-            </label>
-            <p id="key-status" class="status-line"></p>
-          </div>
-
-          <div class="panel-head">
-            <h2>1. Upload</h2>
-            <p>Upload a local file and convert it to Markdown on the server.</p>
-          </div>
-
-          <label class="upload-dropzone" for="file-input">
-            <input
-              id="file-input"
-              type="file"
-              accept=".txt,.text,.log,.md,.mdx,.json,.csv,.tsv,.html,.htm,.xml,.docx,.js,.jsx,.ts,.tsx,.py,.java,.go,.rb,.rs,.sql,.css,.yaml,.yml"
-            />
-            <button id="pick-file-button" class="secondary-button" type="button">Choose file</button>
-            <span id="selected-file-name">No file selected yet</span>
-            <small>The browser uploads the file directly, including `.docx`, then the server stores a Markdown copy.</small>
-          </label>
-
-          <button id="upload-button" class="primary-button" type="button" disabled>Convert to Markdown</button>
-          <p id="upload-status" class="status-line"></p>
-
-          <div class="panel-head compact">
-            <h2>Wiki files (always included in context)</h2>
-            <p>Upload .md files to the wiki folder. These are always sent to the model, not retrieved via search.</p>
-          </div>
-
-          <label class="upload-dropzone" for="wiki-file-input">
-            <input
-              id="wiki-file-input"
-              type="file"
-              accept=".md,.txt,.text"
-            />
-            <button id="wiki-pick-button" class="secondary-button" type="button">Choose wiki file</button>
-            <span id="wiki-file-name">No file selected yet</span>
-            <small>Only .md and .txt files. Content is saved as-is into <code>wiki/default/</code>.</small>
-          </label>
-
-          <button id="wiki-upload-button" class="primary-button" type="button" disabled>Upload to Wiki</button>
-          <p id="wiki-upload-status" class="status-line"></p>
-
-          <div class="wiki-list-wrap">
-            <div id="wiki-list" class="document-list"></div>
-          </div>
-
-          <div class="document-list-wrap">
-            <div class="panel-head compact">
-              <h2>2. Documents</h2>
-              <p>Uploaded documents used as shared context for chat.</p>
-            </div>
-            <div id="document-list" class="document-list"></div>
-          </div>
-        </section>
-
-        <section class="panel chat-panel chat-panel-wide">
-          <div class="panel-head">
-            <h2>3. Ask</h2>
-            <p>Questions are answered from all uploaded documents.</p>
-          </div>
-
-          <div id="chat-log" class="chat-log">
-            <article class="bubble assistant">
-              <strong>Assistant</strong>
-              <p>Ask about any uploaded file. I will search across all uploaded documents.</p>
-            </article>
-          </div>
-
-          <form id="chat-form" class="chat-form">
-            <textarea
-              id="chat-input"
-              rows="4"
-              placeholder="What does this file say about...?"
-            ></textarea>
-            <button class="primary-button" type="submit">Ask Gemini</button>
-          </form>
-
-          <div class="source-box">
-            <p class="source-title">Retrieved chunks</p>
-            <div id="source-list" class="source-list">No retrieval yet.</div>
-          </div>
-        </section>
-      </main>
+    <div id="settings-panel" class="settings-panel hidden">
+      <div class="settings-inner">
+        <label class="field-label" for="api-key-input">Gemini API key</label>
+        <div class="inline-field">
+          <input id="api-key-input" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+          <button id="save-key-button" class="btn-accent" type="button">Save</button>
+        </div>
+        <label class="checkbox-row">
+          <input id="show-key-toggle" type="checkbox" />
+          <span>Show key</span>
+        </label>
+        <p id="key-status" class="status-line"></p>
+      </div>
     </div>
+
+    <main class="app-layout">
+      <aside class="sidebar">
+        <section class="sidebar-section">
+          <h3 class="sidebar-title">Upload Document</h3>
+          <label class="dropzone" for="file-input">
+            <input id="file-input" type="file" accept=".txt,.text,.log,.md,.mdx,.json,.csv,.tsv,.html,.htm,.xml,.docx,.js,.jsx,.ts,.tsx,.py,.java,.go,.rb,.rs,.sql,.css,.yaml,.yml" />
+            <span class="dropzone-icon">&#128462;</span>
+            <span id="selected-file-name">Drop a file or click to browse</span>
+            <small>Supported: .txt .md .json .csv .docx .html and more</small>
+          </label>
+          <button id="upload-button" class="btn-accent full-width" type="button" disabled>Upload & Index</button>
+          <p id="upload-status" class="status-line"></p>
+        </section>
+
+        <section class="sidebar-section">
+          <h3 class="sidebar-title">Wiki Files <span class="badge">always on</span></h3>
+          <label class="dropzone dropzone-sm" for="wiki-file-input">
+            <input id="wiki-file-input" type="file" accept=".md,.txt,.text" />
+            <span id="wiki-file-name">Drop .md or .txt here</span>
+            <small>Saved to wiki folder, always included in context</small>
+          </label>
+          <button id="wiki-upload-button" class="btn-accent full-width" type="button" disabled>Add to Wiki</button>
+          <p id="wiki-upload-status" class="status-line"></p>
+          <div id="wiki-list" class="file-list"></div>
+        </section>
+
+        <section class="sidebar-section">
+          <h3 class="sidebar-title">Documents</h3>
+          <div id="document-list" class="file-list"></div>
+        </section>
+      </aside>
+
+      <section class="chat-area">
+        <div id="chat-log" class="chat-log">
+          <div class="msg msg-system">
+            <span class="msg-avatar">&#9670;</span>
+            <div class="msg-body">
+              <p>Hi! Upload a document or ask a question. I search across all your docs using hybrid retrieval.</p>
+            </div>
+          </div>
+        </div>
+
+        <form id="chat-form" class="chat-input-bar">
+          <textarea id="chat-input" rows="1" placeholder="Ask anything about your documents..."></textarea>
+          <button class="btn-send" type="submit" aria-label="Send">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+          </button>
+        </form>
+
+        <div class="sources-panel">
+          <button id="sources-toggle" class="sources-toggle hidden" type="button">
+            <span>&#128269;</span> Retrieved sources
+            <span id="sources-count" class="badge">0</span>
+          </button>
+          <div id="source-list" class="source-list collapsed"></div>
+        </div>
+      </section>
+    </main>
 
     <script src="/app.js"></script>
   </body>
