@@ -238,6 +238,29 @@ async function getIndexedDocIds() {
   }
 }
 
+async function getDocChunkCounts() {
+  const table = await getTable();
+  try {
+    const rows = await table.query().select(["docId"]).limit(100000).toArray();
+    const counts = {};
+    for (const row of rows) {
+      counts[row.docId] = (counts[row.docId] || 0) + 1;
+    }
+    return counts;
+  } catch {
+    return {};
+  }
+}
+
+async function clearTable() {
+  const db = await getDB();
+  const tableNames = await db.tableNames();
+  if (tableNames.includes(TABLE_NAME)) {
+    await db.dropTable(TABLE_NAME);
+  }
+  tableInstance = null;
+}
+
 async function getChunkCount() {
   const table = await getTable();
   try {
@@ -256,4 +279,6 @@ module.exports = {
   removeDocumentChunks,
   getChunkCount,
   getIndexedDocIds,
+  getDocChunkCounts,
+  clearTable,
 };

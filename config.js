@@ -7,6 +7,6 @@ module.exports = {
   LANCEDB_DIR: path.join(__dirname, "data", "lancedb"),
   GEMINI_EMBEDDING_MODEL: "gemini-embedding-001",
   EMBEDDING_DIMENSION: 768,
-  EMBEDDING_BATCH_SIZE: 5,
-  EMBEDDING_BATCH_DELAY_MS: 1000,
+  EMBEDDING_BATCH_SIZE: 10,
+  EMBEDDING_BATCH_DELAY_MS: 2000,
 };

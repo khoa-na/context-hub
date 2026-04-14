@@ -6,7 +6,7 @@ const config = require("./config");
 const crypto = require("crypto");
 const Busboy = require("busboy");
 const mammoth = require("mammoth");
-const { indexDocumentChunks, hybridSearch, createIndexes, getChunkCount, getIndexedDocIds } = require("./db");
+const { indexDocumentChunks, hybridSearch, createIndexes, getChunkCount, getIndexedDocIds, getDocChunkCounts, removeDocumentChunks, clearTable } = require("./db");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
@@ -914,7 +914,54 @@ async function handleUpload(req, res) {
 async function handleDocuments(_req, res) {
   const docs = await loadAllDocumentsWithMarkdown();
 
+  let chunkCounts = {};
+  try {
+    chunkCounts = await getDocChunkCounts();
+  } catch {}
+
+  for (const doc of docs) {
+    doc.chunkCount = chunkCounts[doc.id] || doc.chunkCount || 0;
+  }
+
+  const index = await readIndex();
+  let updated = false;
+  for (const doc of docs) {
+    const entry = index.find((e) => e.id === doc.id);
+    if (entry && entry.chunkCount !== doc.chunkCount) {
+      entry.chunkCount = doc.chunkCount;
+      updated = true;
+    }
+  }
+  if (updated) {
+    await writeIndex(index);
+  }
+
   return sendJson(res, 200, { documents: docs });
+}
+
+async function handleDeleteDocument(_req, res, docId) {
+  const index = await readIndex();
+  const entry = index.find((e) => e.id === docId);
+  if (!entry) {
+    return sendJson(res, 404, { error: "Document not found." });
+  }
+
+  try {
+    await removeDocumentChunks(docId);
+  } catch (err) {
+    console.error("Failed to remove document chunks from vector DB:", err.message);
+  }
+
+  if (entry.markdownPath) {
+    try {
+      await fs.unlink(path.join(ROOT, entry.markdownPath));
+    } catch {}
+  }
+
+  const updated = index.filter((e) => e.id !== docId);
+  await writeIndex(updated);
+
+  return sendJson(res, 200, { deleted: docId });
 }
 
 async function handleChat(req, res) {
@@ -968,24 +1015,39 @@ async function handleReindex(req, res) {
     return sendJson(res, 400, { error: "API key required for reindexing." });
   }
 
+  const skipTitles = body.skipTitles === true;
+
+  try {
+    await clearTable();
+  } catch (err) {
+    console.error("Failed to clear old index:", err.message);
+  }
+
   const docs = await loadAllDocumentsWithMarkdown();
   let totalChunks = 0;
   const results = [];
+  const index = await readIndex();
 
   for (const doc of docs) {
     try {
-      await removeDocumentChunks(doc.id);
-    } catch {}
-    try {
       const chunks = splitIntoChunks(doc.markdown);
-      await generateChunkTitles(chunks, apiKey);
+      if (!skipTitles) {
+        await generateChunkTitles(chunks, apiKey);
+      }
       await indexDocumentChunks(chunks, doc.filename, doc.title, doc.id, "default", apiKey);
       totalChunks += chunks.length;
       results.push({ id: doc.id, chunks: chunks.length, status: "ok" });
+
+      const entry = index.find((e) => e.id === doc.id);
+      if (entry) {
+        entry.chunkCount = chunks.length;
+      }
     } catch (err) {
       results.push({ id: doc.id, status: "failed", error: err.message });
     }
   }
+
+  await writeIndex(index);
 
   try {
     await createIndexes();
@@ -1056,6 +1118,11 @@ async function router(req, res) {
       return await handleDocuments(req, res);
     }
 
+    if (req.method === "DELETE" && url.pathname.startsWith("/api/documents/")) {
+      const docId = url.pathname.slice("/api/documents/".length);
+      return await handleDeleteDocument(req, res, docId);
+    }
+
     if (req.method === "POST" && url.pathname === "/api/upload") {
       return await handleUpload(req, res);
     }
@@ -1066,6 +1133,34 @@ async function router(req, res) {
 
     if (req.method === "GET" && url.pathname === "/api/wiki-list") {
       return await handleWikiList(req, res);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/save-key") {
+      const body = await parseJson(req);
+      const key = String(body.apiKey || "").trim();
+      if (!key) {
+        return sendJson(res, 400, { error: "apiKey is required." });
+      }
+      const envPath = path.join(ROOT, ".env");
+      let envContent = "";
+      try {
+        envContent = await fs.readFile(envPath, "utf8");
+      } catch {}
+      const lines = envContent.split("\n");
+      let found = false;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith("GEMINI_API_KEY=")) {
+          lines[i] = `GEMINI_API_KEY=${key}`;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        lines.push(`GEMINI_API_KEY=${key}`);
+      }
+      await fs.writeFile(envPath, lines.join("\n"), "utf8");
+      process.env.GEMINI_API_KEY = key;
+      return sendJson(res, 200, { saved: true });
     }
 
     if (req.method === "POST" && url.pathname === "/api/chat") {
@@ -1116,6 +1211,13 @@ async function autoIndexUnindexedDocs() {
       await generateChunkTitles(chunks, apiKey);
       await indexDocumentChunks(chunks, doc.filename, doc.title, doc.id, "default", apiKey);
       console.log(`[auto-index] Indexed "${doc.filename}" (${chunks.length} chunks)`);
+
+      const index = await readIndex();
+      const entry = index.find((e) => e.id === doc.id);
+      if (entry) {
+        entry.chunkCount = chunks.length;
+        await writeIndex(index);
+      }
     } catch (err) {
       console.error(`[auto-index] Failed to index "${doc.filename}":`, err.message);
     }

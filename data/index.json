@@ -1,19 +1,19 @@
 [
   {
+    "id": "quy-trinh-tuyen-dung-test-092be659",
+    "filename": "quy-trinh-tuyen-dung-test.md",
+    "title": "quy-trinh-tuyen-dung-test",
+    "markdownPath": "data/documents/quy-trinh-tuyen-dung-test-092be659.md",
+    "createdAt": "2026-04-14T06:53:07.095Z",
+    "chunkCount": 20
+  },
+  {
     "id": "quy-dinh-lam-viec-tu-xa-m3n4o5p6",
     "filename": "Quy định làm việc từ xa.md",
     "title": "Quy định làm việc từ xa",
     "markdownPath": "data/documents/quy-dinh-lam-viec-tu-xa-m3n4o5p6.md",
     "createdAt": "2026-04-14T00:00:03.000Z",
-    "chunkCount": 0
-  },
-  {
-    "id": "so-tay-nhan-vien-moi-q7r8s9t0",
-    "filename": "Sổ tay nhân viên mới.md",
-    "title": "Sổ tay nhân viên mới",
-    "markdownPath": "data/documents/so-tay-nhan-vien-moi-q7r8s9t0.md",
-    "createdAt": "2026-04-14T00:00:04.000Z",
-    "chunkCount": 0
+    "chunkCount": 18
   },
   {
     "id": "hop-dong-mau-khach-hang-u1v2w3x4",
@@ -21,7 +21,7 @@
     "title": "Hợp đồng mẫu với khách hàng",
     "markdownPath": "data/documents/hop-dong-mau-khach-hang-u1v2w3x4.md",
     "createdAt": "2026-04-14T00:00:05.000Z",
-    "chunkCount": 0
+    "chunkCount": 18
   },
   {
     "id": "erp-huong-dan-su-dung-a1b2c3d4",
@@ -29,7 +29,7 @@
     "title": "Hướng dẫn sử dụng ERP",
     "markdownPath": "data/documents/erp-huong-dan-su-dung-a1b2c3d4.md",
     "createdAt": "2026-04-14T00:00:00.000Z",
-    "chunkCount": 0
+    "chunkCount": 20
   },
   {
     "id": "quan-ly-du-an-noi-bo-f5e6g7h8",
@@ -37,7 +37,7 @@
     "title": "Quản lý dự án nội bộ",
     "markdownPath": "data/documents/quan-ly-du-an-noi-bo-f5e6g7h8.md",
     "createdAt": "2026-04-14T00:00:01.000Z",
-    "chunkCount": 0
+    "chunkCount": 17
   },
   {
     "id": "bang-luong-phuc-loi-i9j0k1l2",
@@ -45,7 +45,7 @@
     "title": "Bảng lương và phúc lợi",
     "markdownPath": "data/documents/bang-luong-phuc-loi-i9j0k1l2.md",
     "createdAt": "2026-04-14T00:00:02.000Z",
-    "chunkCount": 0
+    "chunkCount": 16
   },
   {
     "id": "huong-dan-claude-d2ad5b48",
@@ -53,15 +53,7 @@
     "title": "hướng dẫn claude",
     "markdownPath": "data/documents/huong-dan-claude-d2ad5b48.md",
     "createdAt": "2026-04-13T01:54:38.830Z",
-    "chunkCount": 1
-  },
-  {
-    "id": "bao-cao-so-sanh-cac-mo-hinh-ngon-ngu-lon-e579e133",
-    "filename": "BÁO CÁO SO SÁNH CÁC MÔ HÌNH NGÔN NGỮ LỚN.docx",
-    "title": "BÁO CÁO SO SÁNH CÁC MÔ HÌNH NGÔN NGỮ LỚN",
-    "markdownPath": "data/documents/bao-cao-so-sanh-cac-mo-hinh-ngon-ngu-lon-e579e133.md",
-    "createdAt": "2026-04-13T01:44:08.853Z",
-    "chunkCount": 1
+    "chunkCount": 21
   },
   {
     "id": "weha-mind-os-4d49c3da",

@@ -28,6 +28,28 @@ const wikiList = document.querySelector("#wiki-list");
 
 let sessionApiKey = "";
 
+const dropzone = fileInput.closest(".dropzone");
+const wikiDropzone = wikiFileInput.closest(".dropzone");
+
+function setupDropzone(zone, input, onFile) {
+  ["dragenter", "dragover"].forEach((evt) => {
+    zone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); zone.classList.add("dragover"); });
+  });
+  ["dragleave", "drop"].forEach((evt) => {
+    zone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); zone.classList.remove("dragover"); });
+  });
+  zone.addEventListener("drop", (e) => {
+    const files = e.dataTransfer.files;
+    if (files.length) {
+      input.files = files;
+      onFile();
+    }
+  });
+}
+
+setupDropzone(dropzone, fileInput, updateSelectedFileUI);
+setupDropzone(wikiDropzone, wikiFileInput, updateWikiFileUI);
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -59,14 +81,38 @@ function renderDocuments() {
     documentList.innerHTML = '<p class="empty-state">No documents yet.</p>';
     return;
   }
+
   documentList.innerHTML = state.documents
     .map((doc) => `
-      <div class="doc-card">
-        <span class="doc-title">${escapeHtml(doc.title)}</span>
-        <span class="doc-meta">${escapeHtml(doc.filename)} · ${doc.chunkCount} chunks</span>
+      <div class="doc-card" data-id="${escapeHtml(doc.id)}">
+        <div class="doc-card-row">
+          <div>
+            <span class="doc-title">${escapeHtml(doc.title)}</span>
+            <span class="doc-meta">${escapeHtml(doc.filename)} · ${doc.chunkCount} chunks</span>
+          </div>
+          <button class="doc-delete-btn" data-id="${escapeHtml(doc.id)}" title="Delete document">&times;</button>
+        </div>
       </div>
     `)
     .join("");
+
+  documentList.querySelectorAll(".doc-delete-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      const id = e.currentTarget.dataset.id;
+      if (!confirm("Delete this document and remove it from the search index?")) return;
+      try {
+        const resp = await fetch(`/api/documents/${encodeURIComponent(id)}`, { method: "DELETE" });
+        if (!resp.ok) {
+          const err = await resp.json();
+          throw new Error(err.error || "Delete failed");
+        }
+        state.documents = state.documents.filter((d) => d.id !== id);
+        renderDocuments();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  });
 }
 
 function renderChatMessage(role, content) {
@@ -121,22 +167,37 @@ function resetConversation() {
   renderSources([]);
 }
 
-function saveApiKey() {
+async function saveApiKey() {
   const value = apiKeyInput.value.trim();
   if (!value) {
     sessionApiKey = "";
-    keyStatus.textContent = "Session key cleared.";
+    keyStatus.textContent = "Key cleared.";
     return "";
   }
-  sessionApiKey = value;
-  keyStatus.textContent = "Key saved for this session.";
-  return value;
+
+  try {
+    const response = await fetch("/api/save-key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: value }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Failed to save key.");
+    }
+    sessionApiKey = value;
+    keyStatus.textContent = "Key saved to .env. It will persist across restarts.";
+  } catch (err) {
+    sessionApiKey = value;
+    keyStatus.textContent = "Saved for this session only. Server error: " + err.message;
+  }
+  return sessionApiKey;
 }
 
 function hydrateApiKey() {
   sessionApiKey = "";
   apiKeyInput.value = "";
-  keyStatus.textContent = "No session key. Server .env will be used if available.";
+  keyStatus.textContent = "No session key. Enter your Gemini API key above.";
 }
 
 async function loadDocuments() {
