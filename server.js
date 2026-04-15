@@ -1,6 +1,7 @@
 require("dotenv").config();
 const http = require("http");
 const fs = require("fs/promises");
+const os = require("os");
 const path = require("path");
 const config = require("./config");
 const crypto = require("crypto");
@@ -10,6 +11,7 @@ const { indexDocumentChunks, semanticSearch, bm25Search, hybridSearch, createInd
 const { rerankWithJina } = require("./rerank");
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = String(process.env.HOST || "0.0.0.0").trim();
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_DIR = path.join(ROOT, "data");
@@ -1385,13 +1387,40 @@ async function autoIndexUnindexedDocs() {
   console.log("[auto-index] Done.");
 }
 
+function getNetworkUrls(port) {
+  const urls = [];
+  const interfaces = os.networkInterfaces();
+
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      if (!entry || entry.internal) {
+        continue;
+      }
+
+      if (entry.family === "IPv4") {
+        urls.push(`http://${entry.address}:${port}`);
+      }
+    }
+  }
+
+  return [...new Set(urls)];
+}
+
 async function start() {
   await ensureStorage();
   await autoIndexUnindexedDocs();
 
   const server = http.createServer(router);
-  server.listen(PORT, () => {
+  server.listen(PORT, HOST, () => {
     console.log(`LLM wiki app running at http://localhost:${PORT}`);
+    if (HOST === "0.0.0.0") {
+      const networkUrls = getNetworkUrls(PORT);
+      for (const url of networkUrls) {
+        console.log(`LAN access: ${url}`);
+      }
+    } else if (HOST !== "127.0.0.1" && HOST !== "localhost") {
+      console.log(`Bound to: http://${HOST}:${PORT}`);
+    }
   });
 }
 
