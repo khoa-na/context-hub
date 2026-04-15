@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const Busboy = require("busboy");
 const mammoth = require("mammoth");
 const { indexDocumentChunks, semanticSearch, bm25Search, hybridSearch, createIndexes, getChunkCount, getIndexedDocIds, getDocChunkCounts, removeDocumentChunks, clearTable } = require("./db");
+const { rerankWithJina } = require("./rerank");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
@@ -74,6 +75,31 @@ async function writeIndex(entries) {
   await fs.writeFile(INDEX_PATH, `${JSON.stringify(entries, null, 2)}\n`, "utf8");
 }
 
+async function saveEnvValue(name, value) {
+  const envPath = path.join(ROOT, ".env");
+  let envContent = "";
+  try {
+    envContent = await fs.readFile(envPath, "utf8");
+  } catch {}
+
+  const lines = envContent ? envContent.split("\n") : [];
+  let found = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].startsWith(`${name}=`)) {
+      lines[i] = `${name}=${value}`;
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    lines.push(`${name}=${value}`);
+  }
+
+  await fs.writeFile(envPath, lines.join("\n"), "utf8");
+  process.env[name] = value;
+}
+
 function truncateToTokenBudget(text, tokenBudget) {
   // Approximate: 1 token = 4 chars
   const charLimit = tokenBudget * 4;
@@ -89,6 +115,16 @@ function normalizeRetrievalMode(value) {
 
 function retrievalUsesEmbedding(retrievalMode) {
   return retrievalMode === "semantic" || retrievalMode === "hybrid";
+}
+
+function parseBoolean(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+  }
+  return false;
 }
 
 async function loadWikiContext(tenantId) {
@@ -797,6 +833,34 @@ function serializeChunk(chunk) {
   };
 }
 
+async function maybeRerankChunks({ question, chunks, rerank }) {
+  if (!rerank || !chunks.length) {
+    return {
+      chunks,
+      rerankApplied: false,
+      rerankProvider: null,
+    };
+  }
+
+  const provider = String(rerank.provider || "").trim().toLowerCase();
+  if (provider !== "jina") {
+    throw new Error(`Unsupported rerank provider: ${provider}`);
+  }
+
+  const reranked = await rerankWithJina({
+    query: question,
+    chunks,
+    apiKey: rerank.apiKey,
+    topK: rerank.topK,
+  });
+
+  return {
+    chunks: reranked,
+    rerankApplied: true,
+    rerankProvider: provider,
+  };
+}
+
 async function callGemini({ question, history, apiKey: requestApiKey, tenantId = "default", retrievalMode = "hybrid" }) {
   const apiKey = requestApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -1028,6 +1092,10 @@ async function handleSearch(req, res) {
   const apiKey = String(body.apiKey || "").trim() || process.env.GEMINI_API_KEY || "";
   const retrievalMode = normalizeRetrievalMode(String(body.retrievalMode || "hybrid").trim().toLowerCase());
   const topK = Math.min(Math.max(Number(body.topK) || 5, 1), 20);
+  const useRerank = parseBoolean(body.rerank);
+  const rerankProvider = String(body.rerankProvider || process.env.RERANK_PROVIDER || "jina").trim().toLowerCase();
+  const rerankApiKey = String(body.rerankApiKey || "").trim() || process.env.JINA_API_KEY || "";
+  const retrievalTopK = useRerank ? Math.max(topK, config.RERANK_CANDIDATES || topK) : topK;
 
   if (!question) {
     return sendJson(res, 400, { error: "question is required." });
@@ -1037,20 +1105,41 @@ async function handleSearch(req, res) {
     return sendJson(res, 400, { error: "API key required for semantic or hybrid debug search." });
   }
 
-  const chunks = await retrieveRelevantChunks({
+  if (useRerank && !rerankApiKey) {
+    return sendJson(res, 400, { error: "JINA_API_KEY is required for rerank debug mode." });
+  }
+
+  const initialChunks = await retrieveRelevantChunks({
     question,
     tenantId: "default",
     apiKey,
     retrievalMode,
-    topK,
+    topK: retrievalTopK,
   });
+
+  const rerankResult = await maybeRerankChunks({
+    question,
+    chunks: initialChunks,
+    rerank: useRerank
+      ? {
+          provider: rerankProvider,
+          apiKey: rerankApiKey,
+          topK,
+        }
+      : null,
+  });
+
+  const chunks = useRerank ? rerankResult.chunks : initialChunks;
 
   return sendJson(res, 200, {
     query: question,
     retrievalMode,
     usesEmbedding: retrievalUsesEmbedding(retrievalMode),
+    rerankApplied: rerankResult.rerankApplied,
+    rerankProvider: rerankResult.rerankProvider,
     topK,
     chunkCount: chunks.length,
+    initialChunkCount: initialChunks.length,
     wikiInjectedSeparately: true,
     chunks: chunks.map(serializeChunk),
   });
@@ -1208,25 +1297,17 @@ async function router(req, res) {
       if (!key) {
         return sendJson(res, 400, { error: "apiKey is required." });
       }
-      const envPath = path.join(ROOT, ".env");
-      let envContent = "";
-      try {
-        envContent = await fs.readFile(envPath, "utf8");
-      } catch {}
-      const lines = envContent.split("\n");
-      let found = false;
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].startsWith("GEMINI_API_KEY=")) {
-          lines[i] = `GEMINI_API_KEY=${key}`;
-          found = true;
-          break;
-        }
+      await saveEnvValue("GEMINI_API_KEY", key);
+      return sendJson(res, 200, { saved: true });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/save-jina-key") {
+      const body = await parseJson(req);
+      const key = String(body.apiKey || "").trim();
+      if (!key) {
+        return sendJson(res, 400, { error: "apiKey is required." });
       }
-      if (!found) {
-        lines.push(`GEMINI_API_KEY=${key}`);
-      }
-      await fs.writeFile(envPath, lines.join("\n"), "utf8");
-      process.env.GEMINI_API_KEY = key;
+      await saveEnvValue("JINA_API_KEY", key);
       return sendJson(res, 200, { saved: true });
     }
 

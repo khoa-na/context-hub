@@ -105,9 +105,17 @@ button, textarea, input { font: inherit; color: inherit; }
   margin: 0 auto;
   padding: 16px 24px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 320px;
 }
 
 .field-label { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }

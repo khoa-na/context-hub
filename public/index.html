@@ -25,16 +25,27 @@
 
     <div id="settings-panel" class="settings-panel hidden">
       <div class="settings-inner">
-        <label class="field-label" for="api-key-input">Gemini API key</label>
-        <div class="inline-field">
-          <input id="api-key-input" type="password" placeholder="Paste your key, then press Save" autocomplete="off" spellcheck="false" />
-          <button id="save-key-button" class="btn-accent" type="button">Save to .env</button>
+        <div class="settings-group">
+          <label class="field-label" for="api-key-input">Gemini API key</label>
+          <div class="inline-field">
+            <input id="api-key-input" type="password" placeholder="Paste your Gemini key, then press Save" autocomplete="off" spellcheck="false" />
+            <button id="save-key-button" class="btn-accent" type="button">Save to .env</button>
+          </div>
+          <p id="key-status" class="status-line"></p>
+        </div>
+
+        <div class="settings-group">
+          <label class="field-label" for="jina-api-key-input">Jina API key</label>
+          <div class="inline-field">
+            <input id="jina-api-key-input" type="password" placeholder="Paste your Jina key, then press Save" autocomplete="off" spellcheck="false" />
+            <button id="save-jina-key-button" class="btn-accent" type="button">Save to .env</button>
+          </div>
+          <p id="jina-key-status" class="status-line"></p>
         </div>
         <label class="checkbox-row">
           <input id="show-key-toggle" type="checkbox" />
-          <span>Show key</span>
+          <span>Show keys</span>
         </label>
-        <p id="key-status" class="status-line"></p>
       </div>
     </div>
 
@@ -92,6 +103,10 @@
               <label class="debug-toggle-row">
                 <input id="debug-search-toggle" type="checkbox" />
                 <span>Debug retrieval only</span>
+              </label>
+              <label class="debug-toggle-row">
+                <input id="rerank-toggle" type="checkbox" />
+                <span>Rerank with Jina</span>
               </label>
             </div>
             <textarea id="chat-input" rows="1" placeholder="Ask anything about your documents..."></textarea>

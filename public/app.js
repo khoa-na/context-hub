@@ -10,12 +10,16 @@ const uploadStatus = document.querySelector("#upload-status");
 const documentList = document.querySelector("#document-list");
 const apiKeyInput = document.querySelector("#api-key-input");
 const saveKeyButton = document.querySelector("#save-key-button");
+const jinaApiKeyInput = document.querySelector("#jina-api-key-input");
+const saveJinaKeyButton = document.querySelector("#save-jina-key-button");
 const showKeyToggle = document.querySelector("#show-key-toggle");
 const keyStatus = document.querySelector("#key-status");
+const jinaKeyStatus = document.querySelector("#jina-key-status");
 const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
 const retrievalModeSelect = document.querySelector("#retrieval-mode");
 const debugSearchToggle = document.querySelector("#debug-search-toggle");
+const rerankToggle = document.querySelector("#rerank-toggle");
 const chatLog = document.querySelector("#chat-log");
 const sourceList = document.querySelector("#source-list");
 const sourcesToggle = document.querySelector("#sources-toggle");
@@ -29,6 +33,7 @@ const wikiUploadStatus = document.querySelector("#wiki-upload-status");
 const wikiList = document.querySelector("#wiki-list");
 
 let sessionApiKey = "";
+let sessionJinaApiKey = "";
 
 const dropzone = fileInput.closest(".dropzone");
 const wikiDropzone = wikiFileInput.closest(".dropzone");
@@ -152,6 +157,12 @@ function renderSources(chunks) {
         if (retrieval.bm25Rank) {
           retrievalMeta.push(`bm25 #${retrieval.bm25Rank}`);
         }
+        if (retrieval.rerankRank) {
+          retrievalMeta.push(`rerank #${retrieval.rerankRank}`);
+        }
+        if (typeof retrieval.rerankScore === "number") {
+          retrievalMeta.push(`rerank score ${retrieval.rerankScore.toFixed(3)}`);
+        }
 
         return `
         <div class="source-item">
@@ -180,6 +191,10 @@ function buildSearchDebugSummary(payload) {
     `Matched chunks: ${payload.chunkCount || 0}`,
     payload.usesEmbedding ? "Embedding: Gemini embedding was used." : "Embedding: not used (BM25 only).",
   ];
+
+  if (payload.rerankApplied) {
+    lines.push(`Rerank: ${payload.rerankProvider || "jina"} was applied on ${payload.initialChunkCount || payload.chunkCount || 0} candidates.`);
+  }
 
   if (payload.wikiInjectedSeparately) {
     lines.push("Wiki files are not shown here because they are injected separately at answer time.");
@@ -226,10 +241,40 @@ async function saveApiKey() {
   return sessionApiKey;
 }
 
+async function saveJinaApiKey() {
+  const value = jinaApiKeyInput.value.trim();
+  if (!value) {
+    sessionJinaApiKey = "";
+    jinaKeyStatus.textContent = "Key cleared.";
+    return "";
+  }
+
+  try {
+    const response = await fetch("/api/save-jina-key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: value }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Failed to save key.");
+    }
+    sessionJinaApiKey = value;
+    jinaKeyStatus.textContent = "Jina key saved to .env. It will persist across restarts.";
+  } catch (err) {
+    sessionJinaApiKey = value;
+    jinaKeyStatus.textContent = "Saved for this session only. Server error: " + err.message;
+  }
+  return sessionJinaApiKey;
+}
+
 function hydrateApiKey() {
   sessionApiKey = "";
+  sessionJinaApiKey = "";
   apiKeyInput.value = "";
+  jinaApiKeyInput.value = "";
   keyStatus.textContent = "No session key. Enter your Gemini API key above.";
+  jinaKeyStatus.textContent = "No session key. Enter your Jina API key above for rerank.";
 }
 
 async function loadDocuments() {
@@ -294,8 +339,13 @@ saveKeyButton.addEventListener("click", () => {
   saveApiKey();
 });
 
+saveJinaKeyButton.addEventListener("click", () => {
+  saveJinaApiKey();
+});
+
 showKeyToggle.addEventListener("change", () => {
   apiKeyInput.type = showKeyToggle.checked ? "text" : "password";
+  jinaApiKeyInput.type = showKeyToggle.checked ? "text" : "password";
 });
 
 function updateWikiFileUI() {
@@ -390,13 +440,21 @@ chatForm.addEventListener("submit", async (event) => {
 
   try {
     const apiKey = apiKeyInput.value.trim() || sessionApiKey;
+    const rerankApiKey = jinaApiKeyInput.value.trim() || sessionJinaApiKey;
 
     renderChatMessage("assistant", isDebugSearch ? "Searching..." : "Thinking...");
 
     const response = await fetch(isDebugSearch ? "/api/search" : "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, history: state.history, apiKey, retrievalMode: retrievalModeSelect.value }),
+      body: JSON.stringify({
+        question,
+        history: state.history,
+        apiKey,
+        retrievalMode: retrievalModeSelect.value,
+        rerank: isDebugSearch && rerankToggle.checked,
+        rerankApiKey,
+      }),
     });
 
     const payload = await response.json();
