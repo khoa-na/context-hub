@@ -6,7 +6,7 @@ const config = require("./config");
 const crypto = require("crypto");
 const Busboy = require("busboy");
 const mammoth = require("mammoth");
-const { indexDocumentChunks, hybridSearch, createIndexes, getChunkCount, getIndexedDocIds, getDocChunkCounts, removeDocumentChunks, clearTable } = require("./db");
+const { indexDocumentChunks, semanticSearch, bm25Search, hybridSearch, createIndexes, getChunkCount, getIndexedDocIds, getDocChunkCounts, removeDocumentChunks, clearTable } = require("./db");
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
@@ -81,6 +81,14 @@ function truncateToTokenBudget(text, tokenBudget) {
     return text.slice(0, charLimit) + "\n\n[...TRUNCATED DUE TO TOKEN BUDGET...]";
   }
   return text;
+}
+
+function normalizeRetrievalMode(value) {
+  return ["bm25", "semantic", "hybrid"].includes(value) ? value : "hybrid";
+}
+
+function retrievalUsesEmbedding(retrievalMode) {
+  return retrievalMode === "semantic" || retrievalMode === "hybrid";
 }
 
 async function loadWikiContext(tenantId) {
@@ -765,19 +773,50 @@ async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputToken
   return payload;
 }
 
-async function callGemini({ question, history, apiKey: requestApiKey, tenantId = "default" }) {
+async function retrieveRelevantChunks({ question, tenantId, apiKey, retrievalMode, topK = 5 }) {
+  if (retrievalMode === "semantic") {
+    return semanticSearch(question, tenantId, apiKey, topK);
+  }
+
+  if (retrievalMode === "bm25") {
+    return bm25Search(question, tenantId, topK);
+  }
+
+  return hybridSearch(question, tenantId, apiKey, topK);
+}
+
+function serializeChunk(chunk) {
+  return {
+    id: chunk.id,
+    title: chunk.title,
+    filename: chunk.filename,
+    content: chunk.content,
+    childContent: chunk.childContent || "",
+    score: chunk.score,
+    retrieval: chunk.retrieval || null,
+  };
+}
+
+async function callGemini({ question, history, apiKey: requestApiKey, tenantId = "default", retrievalMode = "hybrid" }) {
   const apiKey = requestApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("Missing Gemini API key. Add GEMINI_API_KEY to the environment or paste a key into the app.");
   }
 
   const wikiContext = await loadWikiContext(tenantId);
+  const selectedRetrievalMode = normalizeRetrievalMode(retrievalMode);
 
   let ragChunks = [];
   try {
-    ragChunks = await hybridSearch(question, tenantId, apiKey, 5);
+    ragChunks = await retrieveRelevantChunks({
+      question,
+      tenantId,
+      apiKey,
+      retrievalMode: selectedRetrievalMode,
+      topK: 5,
+    });
   } catch (err) {
-    console.error("Hybrid search failed, falling back to full context:", err.message);
+    console.error(`${selectedRetrievalMode} search failed, falling back to full context:`, err.message);
   }
 
   let ragContext = "";
@@ -842,6 +881,7 @@ async function callGemini({ question, history, apiKey: requestApiKey, tenantId =
   return {
     answer,
     chunks: ragChunks,
+    retrievalMode: selectedRetrievalMode,
   };
 }
 
@@ -967,23 +1007,52 @@ async function handleChat(req, res) {
   const question = String(body.question || "").trim();
   const apiKey = String(body.apiKey || "").trim();
   const history = Array.isArray(body.history) ? body.history : [];
+  const retrievalMode = normalizeRetrievalMode(String(body.retrievalMode || "hybrid").trim().toLowerCase());
 
   if (!question) {
     return sendJson(res, 400, { error: "question is required." });
   }
 
-  const result = await callGemini({ question, history, apiKey, tenantId: "default" });
+  const result = await callGemini({ question, history, apiKey, tenantId: "default", retrievalMode });
 
   return sendJson(res, 200, {
     answer: result.answer,
-    chunks: result.chunks.map((chunk) => ({
-      id: chunk.id,
-      title: chunk.title,
-      filename: chunk.filename,
-      content: chunk.content,
-      childContent: chunk.childContent || "",
-      score: chunk.score,
-    })),
+    retrievalMode: result.retrievalMode,
+    chunks: result.chunks.map(serializeChunk),
+  });
+}
+
+async function handleSearch(req, res) {
+  const body = await parseJson(req);
+  const question = String(body.question || body.query || "").trim();
+  const apiKey = String(body.apiKey || "").trim() || process.env.GEMINI_API_KEY || "";
+  const retrievalMode = normalizeRetrievalMode(String(body.retrievalMode || "hybrid").trim().toLowerCase());
+  const topK = Math.min(Math.max(Number(body.topK) || 5, 1), 20);
+
+  if (!question) {
+    return sendJson(res, 400, { error: "question is required." });
+  }
+
+  if (retrievalUsesEmbedding(retrievalMode) && !apiKey) {
+    return sendJson(res, 400, { error: "API key required for semantic or hybrid debug search." });
+  }
+
+  const chunks = await retrieveRelevantChunks({
+    question,
+    tenantId: "default",
+    apiKey,
+    retrievalMode,
+    topK,
+  });
+
+  return sendJson(res, 200, {
+    query: question,
+    retrievalMode,
+    usesEmbedding: retrievalUsesEmbedding(retrievalMode),
+    topK,
+    chunkCount: chunks.length,
+    wikiInjectedSeparately: true,
+    chunks: chunks.map(serializeChunk),
   });
 }
 
@@ -1163,6 +1232,10 @@ async function router(req, res) {
 
     if (req.method === "POST" && url.pathname === "/api/chat") {
       return await handleChat(req, res);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/search") {
+      return await handleSearch(req, res);
     }
 
     if (req.method === "POST" && url.pathname === "/api/reindex") {

@@ -4,6 +4,8 @@ const { getGeminiEmbeddingBatch } = require("./embedding");
 
 const EMBEDDING_DIMENSION = config.EMBEDDING_DIMENSION || 768;
 const TABLE_NAME = "chunks";
+const DEFAULT_FETCH_MULTIPLIER = 3;
+const DEFAULT_RRF_K = 60;
 
 let dbInstance = null;
 let tableInstance = null;
@@ -110,20 +112,70 @@ async function indexDocumentChunks(chunks, filename, title, docId, tenantId, api
   return rows.length;
 }
 
-async function hybridSearch(query, tenantId, apiKey, topK = 5) {
+function buildResultRow(row) {
+  return {
+    id: row.id,
+    content: row.content,
+    parentContent: row.parentContent,
+    filename: row.filename,
+    title: row.title,
+    chunkIndex: row.chunkIndex,
+    docId: row.docId,
+  };
+}
+
+function parentSectionKey(row) {
+  return `${row.docId}::${row.parentContent || row.content || row.id}`;
+}
+
+function finalizeResults(candidates, topK) {
+  const seenParents = new Set();
+  const results = [];
+
+  for (const candidate of candidates) {
+    const parentKey = parentSectionKey(candidate);
+    if (seenParents.has(parentKey)) {
+      continue;
+    }
+
+    seenParents.add(parentKey);
+    results.push({
+      id: candidate.id,
+      score: candidate.hybridScore,
+      content: candidate.parentContent || candidate.content,
+      childContent: candidate.content,
+      filename: candidate.filename,
+      title: candidate.title,
+      chunkIndex: candidate.chunkIndex,
+      docId: candidate.docId,
+      retrieval: {
+        semanticRank: candidate.semanticRank || null,
+        bm25Rank: candidate.bm25Rank || null,
+        sources: candidate.sources,
+      },
+    });
+
+    if (results.length >= topK) {
+      break;
+    }
+  }
+
+  return results;
+}
+
+async function semanticSearch(query, tenantId, apiKey, topK = 5, options = {}) {
   if (!apiKey) {
     throw new Error("API key required for search.");
   }
 
   const table = await getTable();
+  const fetchLimit = Math.max(topK, topK * (options.fetchMultiplier || DEFAULT_FETCH_MULTIPLIER));
 
   const [queryEmbedding] = await getGeminiEmbeddingBatch(
     [query],
     apiKey,
     "RETRIEVAL_QUERY"
   );
-
-  const fetchLimit = topK * 3;
 
   const vectorResults = await table
     .query()
@@ -132,6 +184,22 @@ async function hybridSearch(query, tenantId, apiKey, topK = 5) {
     .limit(fetchLimit)
     .withRowId()
     .toArray();
+
+  return finalizeResults(
+    vectorResults.map((row, index) => ({
+      ...buildResultRow(row),
+      semanticRank: index + 1,
+      bm25Rank: null,
+      hybridScore: 1 / (DEFAULT_RRF_K + index + 1),
+      sources: ["semantic"],
+    })),
+    topK
+  );
+}
+
+async function bm25Search(query, tenantId, topK = 5, options = {}) {
+  const table = await getTable();
+  const fetchLimit = Math.max(topK, topK * (options.fetchMultiplier || DEFAULT_FETCH_MULTIPLIER));
 
   let ftsResults = [];
   try {
@@ -142,77 +210,79 @@ async function hybridSearch(query, tenantId, apiKey, topK = 5) {
       .withRowId()
       .toArray();
   } catch (err) {
-    console.error("[lancedb] FTS search failed, using vector only:", err.message);
+    console.error("[lancedb] FTS search failed:", err.message);
+    return [];
   }
 
-  const scored = new Map();
-  const ftsIds = new Set();
+  return finalizeResults(
+    ftsResults.map((row, index) => ({
+      ...buildResultRow(row),
+      semanticRank: null,
+      bm25Rank: index + 1,
+      hybridScore: 1 / (DEFAULT_RRF_K + index + 1),
+      sources: ["bm25"],
+    })),
+    topK
+  );
+}
 
-  for (const row of vectorResults) {
+async function hybridSearch(query, tenantId, apiKey, topK = 5, options = {}) {
+  const fetchLimit = Math.max(topK, topK * (options.fetchMultiplier || DEFAULT_FETCH_MULTIPLIER));
+  const rrfK = options.rrfK || DEFAULT_RRF_K;
+
+  const [semanticResults, bm25Results] = await Promise.all([
+    semanticSearch(query, tenantId, apiKey, fetchLimit, options),
+    bm25Search(query, tenantId, fetchLimit, options),
+  ]);
+
+  const scored = new Map();
+
+  for (const row of semanticResults) {
     scored.set(row.id, {
       id: row.id,
-      content: row.content,
-      parentContent: row.parentContent,
+      content: row.childContent,
+      parentContent: row.content,
       filename: row.filename,
       title: row.title,
       chunkIndex: row.chunkIndex,
       docId: row.docId,
-      vectorDistance: row._distance != null ? row._distance : null,
-      ftsHit: false,
+      semanticRank: row.retrieval.semanticRank,
+      bm25Rank: null,
+      sources: ["semantic"],
     });
   }
 
-  for (const row of ftsResults) {
-    ftsIds.add(row.id);
+  for (const row of bm25Results) {
     if (scored.has(row.id)) {
-      scored.get(row.id).ftsHit = true;
+      const existing = scored.get(row.id);
+      existing.bm25Rank = row.retrieval.bm25Rank;
+      existing.sources = ["semantic", "bm25"];
     } else {
       scored.set(row.id, {
         id: row.id,
-        content: row.content,
-        parentContent: row.parentContent,
+        content: row.childContent,
+        parentContent: row.content,
         filename: row.filename,
         title: row.title,
         chunkIndex: row.chunkIndex,
         docId: row.docId,
-        vectorDistance: null,
-        ftsHit: true,
+        semanticRank: null,
+        bm25Rank: row.retrieval.bm25Rank,
+        sources: ["bm25"],
       });
     }
   }
 
   const candidates = [...scored.values()];
 
-  const withVector = candidates.filter((c) => c.vectorDistance != null);
-  const withFts = candidates.filter((c) => c.ftsHit);
-  const vectorDistances = withVector.map((c) => c.vectorDistance);
-
-  let normVector = () => 0;
-  if (vectorDistances.length > 0) {
-    const minDist = Math.min(...vectorDistances);
-    const maxDist = Math.max(...vectorDistances);
-    const range = maxDist - minDist || 1;
-    normVector = (d) => (d != null ? 1 - (d - minDist) / range : 0);
-  }
-
   for (const c of candidates) {
-    const vScore = normVector(c.vectorDistance);
-    const fScore = c.ftsHit ? 1 : 0;
-    c.hybridScore = 0.6 * vScore + 0.4 * fScore;
+    const semanticScore = c.semanticRank ? 1 / (rrfK + c.semanticRank) : 0;
+    const bm25Score = c.bm25Rank ? 1 / (rrfK + c.bm25Rank) : 0;
+    c.hybridScore = semanticScore + bm25Score;
   }
 
   candidates.sort((a, b) => b.hybridScore - a.hybridScore);
-
-  return candidates.slice(0, topK).map((row) => ({
-    id: row.id,
-    score: row.hybridScore,
-    content: row.parentContent || row.content,
-    childContent: row.content,
-    filename: row.filename,
-    title: row.title,
-    chunkIndex: row.chunkIndex,
-    docId: row.docId,
-  }));
+  return finalizeResults(candidates, topK);
 }
 
 async function removeDocumentChunks(docId) {
@@ -275,6 +345,8 @@ module.exports = {
   getTable,
   createIndexes,
   indexDocumentChunks,
+  semanticSearch,
+  bm25Search,
   hybridSearch,
   removeDocumentChunks,
   getChunkCount,

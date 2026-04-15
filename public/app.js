@@ -14,6 +14,8 @@ const showKeyToggle = document.querySelector("#show-key-toggle");
 const keyStatus = document.querySelector("#key-status");
 const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
+const retrievalModeSelect = document.querySelector("#retrieval-mode");
+const debugSearchToggle = document.querySelector("#debug-search-toggle");
 const chatLog = document.querySelector("#chat-log");
 const sourceList = document.querySelector("#source-list");
 const sourcesToggle = document.querySelector("#sources-toggle");
@@ -138,10 +140,24 @@ function renderSources(chunks) {
 
   sourceList.innerHTML = chunks
     .map(
-      (chunk) => `
+      (chunk) => {
+        const retrievalMeta = [];
+        const retrieval = chunk.retrieval || {};
+        if (Array.isArray(retrieval.sources) && retrieval.sources.length) {
+          retrievalMeta.push(retrieval.sources.join(" + "));
+        }
+        if (retrieval.semanticRank) {
+          retrievalMeta.push(`semantic #${retrieval.semanticRank}`);
+        }
+        if (retrieval.bm25Rank) {
+          retrievalMeta.push(`bm25 #${retrieval.bm25Rank}`);
+        }
+
+        return `
         <div class="source-item">
           <strong>${escapeHtml(chunk.id)} · ${escapeHtml(chunk.title)}</strong>
           <p class="source-file">${escapeHtml(chunk.filename || "")}</p>
+          ${retrievalMeta.length ? `<p class="source-retrieval">${escapeHtml(retrievalMeta.join(" · "))}</p>` : ""}
           <details>
             <summary>Matched passage</summary>
             <p>${escapeHtml((chunk.childContent || "").slice(0, 300))}</p>
@@ -151,9 +167,25 @@ function renderSources(chunks) {
             <p>${escapeHtml((chunk.content || "").slice(0, 600))}</p>
           </details>
         </div>
-      `
+      `;
+      }
     )
     .join("");
+}
+
+function buildSearchDebugSummary(payload) {
+  const mode = payload.retrievalMode || retrievalModeSelect.value;
+  const lines = [
+    `Debug retrieval mode: ${mode}`,
+    `Matched chunks: ${payload.chunkCount || 0}`,
+    payload.usesEmbedding ? "Embedding: Gemini embedding was used." : "Embedding: not used (BM25 only).",
+  ];
+
+  if (payload.wikiInjectedSeparately) {
+    lines.push("Wiki files are not shown here because they are injected separately at answer time.");
+  }
+
+  return lines.join("\n");
 }
 
 function resetConversation() {
@@ -350,6 +382,7 @@ chatForm.addEventListener("submit", async (event) => {
 
   const question = chatInput.value.trim();
   if (!question) return;
+  const isDebugSearch = debugSearchToggle.checked;
 
   renderChatMessage("user", question);
   chatInput.value = "";
@@ -358,12 +391,12 @@ chatForm.addEventListener("submit", async (event) => {
   try {
     const apiKey = apiKeyInput.value.trim() || sessionApiKey;
 
-    renderChatMessage("assistant", "Thinking...");
+    renderChatMessage("assistant", isDebugSearch ? "Searching..." : "Thinking...");
 
-    const response = await fetch("/api/chat", {
+    const response = await fetch(isDebugSearch ? "/api/search" : "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, history: state.history, apiKey }),
+      body: JSON.stringify({ question, history: state.history, apiKey, retrievalMode: retrievalModeSelect.value }),
     });
 
     const payload = await response.json();
@@ -372,10 +405,15 @@ chatForm.addEventListener("submit", async (event) => {
     }
 
     const lastMsg = chatLog.querySelector(".msg:last-child .msg-body p");
-    if (lastMsg) lastMsg.textContent = payload.answer;
+    if (lastMsg) {
+      lastMsg.textContent = isDebugSearch ? buildSearchDebugSummary(payload) : payload.answer;
+    }
 
-    state.history.push({ role: "user", content: question });
-    state.history.push({ role: "assistant", content: payload.answer });
+    if (!isDebugSearch) {
+      state.history.push({ role: "user", content: question });
+      state.history.push({ role: "assistant", content: payload.answer });
+    }
+
     renderSources(payload.chunks);
   } catch (error) {
     const lastMsg = chatLog.querySelector(".msg:last-child .msg-body p");

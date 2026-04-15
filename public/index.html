@@ -81,7 +81,21 @@
         </div>
 
         <form id="chat-form" class="chat-input-bar">
-          <textarea id="chat-input" rows="1" placeholder="Ask anything about your documents..."></textarea>
+          <div class="chat-input-stack">
+            <div class="mode-select-row">
+              <span>Search mode</span>
+              <select id="retrieval-mode">
+                <option value="hybrid" selected>Hybrid</option>
+                <option value="semantic">Semantic</option>
+                <option value="bm25">BM25</option>
+              </select>
+              <label class="debug-toggle-row">
+                <input id="debug-search-toggle" type="checkbox" />
+                <span>Debug retrieval only</span>
+              </label>
+            </div>
+            <textarea id="chat-input" rows="1" placeholder="Ask anything about your documents..."></textarea>
+          </div>
           <button class="btn-send" type="submit" aria-label="Send">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
           </button>
