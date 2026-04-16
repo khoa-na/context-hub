@@ -1,5 +1,5 @@
 {
-  "name": "llm-wiki",
+  "name": "context-hub",
   "version": "0.1.0",
   "private": true,
   "description": "Simple upload-to-markdown Q&A app powered by the Google Gemini API.",

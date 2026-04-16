@@ -1412,7 +1412,7 @@ async function start() {
 
   const server = http.createServer(router);
   server.listen(PORT, HOST, () => {
-    console.log(`LLM wiki app running at http://localhost:${PORT}`);
+    console.log(`context-hub running at http://localhost:${PORT}`);
     if (HOST === "0.0.0.0") {
       const networkUrls = getNetworkUrls(PORT);
       for (const url of networkUrls) {

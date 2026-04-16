@@ -1,4 +1,4 @@
-# llm-wiki
+# context-hub
 
 Document Q&A app powered by Google Gemini, LanceDB, and a small vanilla JS UI.
 
