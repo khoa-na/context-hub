@@ -17,13 +17,17 @@ const keyStatus = document.querySelector("#key-status");
 const jinaKeyStatus = document.querySelector("#jina-key-status");
 const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
+const chatModeSelect = document.querySelector("#chat-mode");
 const retrievalModeSelect = document.querySelector("#retrieval-mode");
 const debugSearchToggle = document.querySelector("#debug-search-toggle");
 const rerankToggle = document.querySelector("#rerank-toggle");
+const documentFocusRow = document.querySelector("#document-focus-row");
+const documentFocusSelect = document.querySelector("#document-focus-select");
 const chatLog = document.querySelector("#chat-log");
 const sourceList = document.querySelector("#source-list");
 const sourcesToggle = document.querySelector("#sources-toggle");
 const sourcesCount = document.querySelector("#sources-count");
+const newSessionButton = document.querySelector("#new-session-button");
 const settingsToggle = document.querySelector("#settings-toggle");
 const settingsPanel = document.querySelector("#settings-panel");
 const wikiFileInput = document.querySelector("#wiki-file-input");
@@ -115,11 +119,47 @@ function renderDocuments() {
         }
         state.documents = state.documents.filter((d) => d.id !== id);
         renderDocuments();
+        renderDocumentFocusOptions();
+        updateChatModeUI();
       } catch (err) {
         alert(err.message);
       }
     });
   });
+}
+
+function renderDocumentFocusOptions() {
+  if (!state.documents.length) {
+    documentFocusSelect.innerHTML = '<option value="">No documents available</option>';
+    documentFocusSelect.disabled = true;
+    return;
+  }
+
+  const currentValue = documentFocusSelect.value;
+  documentFocusSelect.innerHTML = state.documents
+    .map((doc) => `<option value="${escapeHtml(doc.id)}">${escapeHtml(doc.title)} (${escapeHtml(doc.filename)})</option>`)
+    .join("");
+
+  const hasCurrent = state.documents.some((doc) => doc.id === currentValue);
+  documentFocusSelect.value = hasCurrent ? currentValue : state.documents[0].id;
+  documentFocusSelect.disabled = false;
+}
+
+function updateChatModeUI() {
+  const isFullDocumentMode = chatModeSelect.value === "full-document";
+
+  documentFocusRow.hidden = !isFullDocumentMode;
+  retrievalModeSelect.disabled = isFullDocumentMode;
+  debugSearchToggle.disabled = isFullDocumentMode;
+  rerankToggle.disabled = isFullDocumentMode;
+
+  if (isFullDocumentMode) {
+    debugSearchToggle.checked = false;
+    rerankToggle.checked = false;
+    chatInput.placeholder = "Ask for a summary or analysis of the selected document...";
+  } else {
+    chatInput.placeholder = "Ask anything about your documents...";
+  }
 }
 
 function renderChatMessage(role, content) {
@@ -163,20 +203,22 @@ function renderSources(chunks) {
         if (typeof retrieval.rerankScore === "number") {
           retrievalMeta.push(`rerank score ${retrieval.rerankScore.toFixed(3)}`);
         }
+        const matchedPassage = (chunk.childContent || "").trim();
+        const fullContext = (chunk.content || "").trim();
 
         return `
         <div class="source-item">
           <strong>${escapeHtml(chunk.id)} · ${escapeHtml(chunk.title)}</strong>
           <p class="source-file">${escapeHtml(chunk.filename || "")}</p>
           ${retrievalMeta.length ? `<p class="source-retrieval">${escapeHtml(retrievalMeta.join(" · "))}</p>` : ""}
-          <details>
+          ${matchedPassage ? `<details>
             <summary>Matched passage</summary>
-            <p>${escapeHtml((chunk.childContent || "").slice(0, 300))}</p>
-          </details>
-          <details>
+            <p>${escapeHtml(matchedPassage.slice(0, 300))}</p>
+          </details>` : ""}
+          ${fullContext ? `<details>
             <summary>Full section context</summary>
-            <p>${escapeHtml((chunk.content || "").slice(0, 600))}</p>
-          </details>
+            <p>${escapeHtml(fullContext.slice(0, 600))}</p>
+          </details>` : ""}
         </div>
       `;
       }
@@ -203,15 +245,34 @@ function buildSearchDebugSummary(payload) {
   return lines.join("\n");
 }
 
-function resetConversation() {
+async function resetSessionOnServer() {
+  const response = await fetch("/api/session/reset", {
+    method: "POST",
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "Failed to reset session.");
+  }
+
+  return payload;
+}
+
+function resetConversation(resetServer = false) {
   state.history = [];
   chatLog.innerHTML = `
     <div class="msg msg-system">
       <span class="msg-avatar">&#9670;</span>
-      <div class="msg-body"><p>Hi! Upload a document or ask a question. I search across all your docs using hybrid retrieval.</p></div>
+      <div class="msg-body"><p>Hi! Upload a document, ask a question, or switch to Full document mode to summarize one selected file.</p></div>
     </div>
   `;
   renderSources([]);
+
+  if (resetServer) {
+    resetSessionOnServer().catch((error) => {
+      console.error("Failed to reset session:", error.message);
+    });
+  }
 }
 
 async function saveApiKey() {
@@ -282,6 +343,8 @@ async function loadDocuments() {
   const payload = await response.json();
   state.documents = payload.documents || [];
   renderDocuments();
+  renderDocumentFocusOptions();
+  updateChatModeUI();
 }
 
 uploadButton.addEventListener("click", async () => {
@@ -320,7 +383,7 @@ uploadButton.addEventListener("click", async () => {
     }
 
     await loadDocuments();
-    resetConversation();
+    resetConversation(true);
     fileInput.value = "";
     updateSelectedFileUI();
   } catch (error) {
@@ -346,6 +409,21 @@ saveJinaKeyButton.addEventListener("click", () => {
 showKeyToggle.addEventListener("change", () => {
   apiKeyInput.type = showKeyToggle.checked ? "text" : "password";
   jinaApiKeyInput.type = showKeyToggle.checked ? "text" : "password";
+});
+
+chatModeSelect.addEventListener("change", () => {
+  updateChatModeUI();
+  resetConversation(true);
+});
+
+documentFocusSelect.addEventListener("change", () => {
+  if (chatModeSelect.value === "full-document") {
+    resetConversation(true);
+  }
+});
+
+newSessionButton.addEventListener("click", () => {
+  resetConversation(true);
 });
 
 function updateWikiFileUI() {
@@ -432,7 +510,18 @@ chatForm.addEventListener("submit", async (event) => {
 
   const question = chatInput.value.trim();
   if (!question) return;
+  const chatMode = chatModeSelect.value;
   const isDebugSearch = debugSearchToggle.checked;
+
+  if (chatMode === "full-document" && !state.documents.length) {
+    renderChatMessage("assistant", "Please upload a document first before using Full document mode.");
+    return;
+  }
+
+  if (chatMode === "full-document" && !documentFocusSelect.value) {
+    renderChatMessage("assistant", "Select a target document before using Full document mode.");
+    return;
+  }
 
   renderChatMessage("user", question);
   chatInput.value = "";
@@ -441,16 +530,19 @@ chatForm.addEventListener("submit", async (event) => {
   try {
     const apiKey = apiKeyInput.value.trim() || sessionApiKey;
     const rerankApiKey = jinaApiKeyInput.value.trim() || sessionJinaApiKey;
+    const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
 
-    renderChatMessage("assistant", isDebugSearch ? "Searching..." : "Thinking...");
+    renderChatMessage("assistant", isDebugSearch ? "Searching..." : chatMode === "full-document" ? "Reading the full document..." : "Thinking...");
 
-    const response = await fetch(isDebugSearch ? "/api/search" : "/api/chat", {
+    const response = await fetch(requestPath, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         question,
         history: state.history,
         apiKey,
+        chatMode,
+        documentId: chatMode === "full-document" ? documentFocusSelect.value : "",
         retrievalMode: retrievalModeSelect.value,
         rerank: isDebugSearch && rerankToggle.checked,
         rerankApiKey,
@@ -485,6 +577,7 @@ chatInput.addEventListener("input", () => {
 });
 
 hydrateApiKey();
+updateChatModeUI();
 updateSelectedFileUI();
 loadDocuments().catch((error) => { uploadStatus.textContent = error.message; });
 loadWikiFiles();
