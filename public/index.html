@@ -85,14 +85,14 @@
       </aside>
 
       <section class="chat-area">
-        <div id="chat-log" class="chat-log">
-          <div class="msg msg-system">
-            <span class="msg-avatar">&#9670;</span>
-            <div class="msg-body">
-              <p>Hi! Upload a document or ask a question. I search across all your docs using hybrid retrieval.</p>
+          <div id="chat-log" class="chat-log">
+            <div class="msg msg-system">
+              <span class="msg-avatar">&#9670;</span>
+              <div class="msg-body">
+                <p>Hi! Upload documents or ask a question. I can search across all your docs or read one or more selected files in Full document mode.</p>
+              </div>
             </div>
           </div>
-        </div>
 
         <form id="chat-form" class="chat-input-bar">
           <div class="chat-input-stack">
@@ -118,8 +118,8 @@
               </label>
             </div>
             <div id="document-focus-row" class="document-focus-row" hidden>
-              <label for="document-focus-select">Target document</label>
-              <select id="document-focus-select"></select>
+              <label for="document-focus-select">Target documents</label>
+              <select id="document-focus-select" multiple size="6"></select>
             </div>
             <textarea id="chat-input" rows="1" placeholder="Ask anything about your documents..."></textarea>
           </div>

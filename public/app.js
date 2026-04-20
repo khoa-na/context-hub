@@ -135,14 +135,27 @@ function renderDocumentFocusOptions() {
     return;
   }
 
-  const currentValue = documentFocusSelect.value;
+  const currentValues = new Set(Array.from(documentFocusSelect.selectedOptions).map((option) => option.value));
   documentFocusSelect.innerHTML = state.documents
     .map((doc) => `<option value="${escapeHtml(doc.id)}">${escapeHtml(doc.title)} (${escapeHtml(doc.filename)})</option>`)
     .join("");
 
-  const hasCurrent = state.documents.some((doc) => doc.id === currentValue);
-  documentFocusSelect.value = hasCurrent ? currentValue : state.documents[0].id;
+  const options = Array.from(documentFocusSelect.options);
+  const selected = state.documents.filter((doc) => currentValues.has(doc.id));
+  if (selected.length) {
+    options.forEach((option) => {
+      option.selected = currentValues.has(option.value);
+    });
+  } else if (options[0]) {
+    options[0].selected = true;
+  }
   documentFocusSelect.disabled = false;
+}
+
+function getSelectedDocumentIds() {
+  return Array.from(documentFocusSelect.selectedOptions)
+    .map((option) => option.value)
+    .filter(Boolean);
 }
 
 function updateChatModeUI() {
@@ -156,7 +169,7 @@ function updateChatModeUI() {
   if (isFullDocumentMode) {
     debugSearchToggle.checked = false;
     rerankToggle.checked = false;
-    chatInput.placeholder = "Ask for a summary or analysis of the selected document...";
+    chatInput.placeholder = "Ask for a summary, comparison, or analysis of the selected documents...";
   } else {
     chatInput.placeholder = "Ask anything about your documents...";
   }
@@ -263,7 +276,7 @@ function resetConversation(resetServer = false) {
   chatLog.innerHTML = `
     <div class="msg msg-system">
       <span class="msg-avatar">&#9670;</span>
-      <div class="msg-body"><p>Hi! Upload a document, ask a question, or switch to Full document mode to summarize one selected file.</p></div>
+      <div class="msg-body"><p>Hi! Upload a document, ask a question, or switch to Full document mode to summarize one or more selected files.</p></div>
     </div>
   `;
   renderSources([]);
@@ -514,12 +527,14 @@ chatForm.addEventListener("submit", async (event) => {
   const isDebugSearch = debugSearchToggle.checked;
 
   if (chatMode === "full-document" && !state.documents.length) {
-    renderChatMessage("assistant", "Please upload a document first before using Full document mode.");
+    renderChatMessage("assistant", "Please upload at least one document first before using Full document mode.");
     return;
   }
 
-  if (chatMode === "full-document" && !documentFocusSelect.value) {
-    renderChatMessage("assistant", "Select a target document before using Full document mode.");
+  const selectedDocumentIds = chatMode === "full-document" ? getSelectedDocumentIds() : [];
+
+  if (chatMode === "full-document" && !selectedDocumentIds.length) {
+    renderChatMessage("assistant", "Select one or more target documents before using Full document mode.");
     return;
   }
 
@@ -542,7 +557,8 @@ chatForm.addEventListener("submit", async (event) => {
         history: state.history,
         apiKey,
         chatMode,
-        documentId: chatMode === "full-document" ? documentFocusSelect.value : "",
+        documentId: chatMode === "full-document" ? (selectedDocumentIds[0] || "") : "",
+        documentIds: selectedDocumentIds,
         retrievalMode: retrievalModeSelect.value,
         rerank: isDebugSearch && rerankToggle.checked,
         rerankApiKey,
