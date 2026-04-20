@@ -47,6 +47,18 @@ async function getTable() {
   return tableInstance;
 }
 
+async function refreshTable() {
+  const db = await getDB();
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(TABLE_NAME)) {
+    tableInstance = null;
+    return null;
+  }
+
+  tableInstance = await db.openTable(TABLE_NAME);
+  return tableInstance;
+}
+
 async function createIndexes() {
   const table = await getTable();
   let rowCount = 0;
@@ -86,6 +98,8 @@ async function createIndexes() {
   } else {
     console.log(`[lancedb] Only ${rowCount} rows, vector index requires 256+. Skipping.`);
   }
+
+  await refreshTable();
 }
 
 async function indexDocumentChunks(chunks, filename, title, docId, tenantId, apiKey) {
@@ -109,6 +123,7 @@ async function indexDocumentChunks(chunks, filename, title, docId, tenantId, api
   }));
 
   await table.add(rows);
+  await refreshTable();
   return rows.length;
 }
 
@@ -197,18 +212,29 @@ async function semanticSearch(query, tenantId, apiKey, topK = 5, options = {}) {
   );
 }
 
+async function runBm25Query(table, query, fetchLimit) {
+  return table
+    .query()
+    .fullTextSearch(query, { columns: ["content", "parentContent"] })
+    .limit(fetchLimit)
+    .withRowId()
+    .toArray();
+}
+
 async function bm25Search(query, tenantId, topK = 5, options = {}) {
   const table = await getTable();
   const fetchLimit = Math.max(topK, topK * (options.fetchMultiplier || DEFAULT_FETCH_MULTIPLIER));
 
   let ftsResults = [];
   try {
-    ftsResults = await table
-      .query()
-      .fullTextSearch(query, { columns: ["content", "parentContent"] })
-      .limit(fetchLimit)
-      .withRowId()
-      .toArray();
+    ftsResults = await runBm25Query(table, query, fetchLimit);
+
+    if (!ftsResults.length && options.retryOnEmpty !== false) {
+      await createIndexes();
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      const refreshedTable = await getTable();
+      ftsResults = await runBm25Query(refreshedTable, query, fetchLimit);
+    }
   } catch (err) {
     console.error("[lancedb] FTS search failed:", err.message);
     return [];
@@ -287,11 +313,9 @@ async function hybridSearch(query, tenantId, apiKey, topK = 5, options = {}) {
 
 async function removeDocumentChunks(docId) {
   const table = await getTable();
-  try {
-    await table.delete(`docId = '${docId}'`);
-  } catch (err) {
-    console.error("[lancedb] Delete failed:", err.message);
-  }
+  const safeDocId = String(docId).replace(/'/g, "\\'");
+  await table.delete(`docId = '${safeDocId}'`);
+  await refreshTable();
 }
 
 async function getIndexedDocIds() {
