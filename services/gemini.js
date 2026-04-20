@@ -140,7 +140,23 @@ function buildGeminiUserPrompt({ question, contextText, history }) {
     .join("\n\n");
 }
 
-function buildDirectFullDocumentPrompt({ question, history, document }) {
+function normalizeDocumentsInput(documentsOrDocument) {
+  return Array.isArray(documentsOrDocument) ? documentsOrDocument : [documentsOrDocument];
+}
+
+function buildDocumentListHeader(documents) {
+  return normalizeDocumentsInput(documents)
+    .map((document, index) => `Document ${index + 1} ID: ${document.id}\nTitle: ${document.title}\nFilename: ${document.filename}`)
+    .join("\n\n");
+}
+
+function buildDocumentsMarkdownBlock(documents) {
+  return normalizeDocumentsInput(documents)
+    .map((document, index) => `=== DOCUMENT ${index + 1} ===\nDocument ID: ${document.id}\nTitle: ${document.title}\nFilename: ${document.filename}\n\n${document.markdown}`)
+    .join("\n\n");
+}
+
+function buildDirectFullDocumentPrompt({ question, history, documents }) {
   const historyLines = (history || [])
     .slice(-4)
     .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
@@ -148,19 +164,18 @@ function buildDirectFullDocumentPrompt({ question, history, document }) {
 
   return [
     historyLines ? `Conversation so far:\n${historyLines}` : "",
-    `=== SELECTED DOCUMENT ===\nDocument ID: ${document.id}\nTitle: ${document.title}\nFilename: ${document.filename}`,
-    `=== FULL DOCUMENT MARKDOWN ===\n${document.markdown}`,
+    `=== SELECTED DOCUMENTS ===\n${buildDocumentListHeader(documents)}`,
+    `=== FULL DOCUMENT MARKDOWN ===\n${buildDocumentsMarkdownBlock(documents)}`,
     `=== USER REQUEST ===\n${question}`,
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-function buildDocumentSlicePrompt({ question, document, sliceText, sliceIndex, totalSlices }) {
+function buildDocumentSlicePrompt({ question, documents, sliceText, sliceIndex, totalSlices }) {
   return [
-    `Document ID: ${document.id}`,
-    `Title: ${document.title}`,
-    `Filename: ${document.filename}`,
+    "Selected documents:",
+    buildDocumentListHeader(documents),
     `Slice ${sliceIndex} of ${totalSlices}`,
     `User request: ${question}`,
     "Summarize this slice for later whole-document synthesis.",
@@ -168,7 +183,7 @@ function buildDocumentSlicePrompt({ question, document, sliceText, sliceIndex, t
   ].join("\n\n");
 }
 
-function buildFullDocumentSynthesisPrompt({ question, history, document, sliceSummaries }) {
+function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceSummaries }) {
   const historyLines = (history || [])
     .slice(-4)
     .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
@@ -176,7 +191,7 @@ function buildFullDocumentSynthesisPrompt({ question, history, document, sliceSu
 
   return [
     historyLines ? `Conversation so far:\n${historyLines}` : "",
-    `=== SELECTED DOCUMENT ===\nDocument ID: ${document.id}\nTitle: ${document.title}\nFilename: ${document.filename}`,
+    `=== SELECTED DOCUMENTS ===\n${buildDocumentListHeader(documents)}`,
     "=== WHOLE-DOCUMENT SLICE SUMMARIES ===",
     sliceSummaries.map((summary, index) => `Slice ${index + 1}:\n${summary}`).join("\n\n"),
     `=== USER REQUEST ===\n${question}`,

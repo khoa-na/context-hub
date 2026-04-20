@@ -213,6 +213,7 @@ async function handleChat(req, res) {
   const apiKey = String(body.apiKey || "").trim();
   const chatMode = normalizeChatMode(String(body.chatMode || "qa").trim().toLowerCase());
   const documentId = String(body.documentId || "").trim();
+  const documentIds = Array.isArray(body.documentIds) ? body.documentIds : [];
   const retrievalMode = normalizeRetrievalMode(String(body.retrievalMode || "hybrid").trim().toLowerCase());
 
   if (!question) {
@@ -220,7 +221,7 @@ async function handleChat(req, res) {
   }
 
   const result = chatMode === "full-document"
-    ? await answerWithFullDocument({ question, history: session.history, apiKey, documentId })
+    ? await answerWithFullDocument({ question, history: session.history, apiKey, documentId, documentIds })
     : await callGemini({ question, history: session.history, apiKey, tenantId: "default", retrievalMode });
 
   session.history.push(
@@ -235,6 +236,7 @@ async function handleChat(req, res) {
     retrievalMode: result.retrievalMode,
     sessionId: session.id,
     document: result.document || null,
+    documents: result.documents || [],
     sliceCount: result.sliceCount || null,
     chunks: result.chunks.map(serializeChunk),
   });
