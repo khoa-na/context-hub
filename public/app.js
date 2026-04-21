@@ -47,6 +47,7 @@ const wikiList = document.querySelector("#wiki-list");
 
 let sessionApiKey = "";
 let sessionJinaApiKey = "";
+let selectedDocIds = new Set();
 
 const dropzone = fileInput.closest(".dropzone");
 const wikiDropzone = wikiFileInput.closest(".dropzone");
@@ -126,6 +127,7 @@ function renderDocuments() {
           const err = await resp.json();
           throw new Error(err.error || "Delete failed");
         }
+        selectedDocIds.delete(id);
         state.documents = state.documents.filter((d) => d.id !== id);
         state.selectedDocIds.delete(id);
         renderDocuments();
@@ -229,6 +231,19 @@ function getSelectedModelIds() {
   return Array.from(state.selectedModels);
 }
 
+function selectAllDocuments() {
+  state.documents.forEach((doc) => selectedDocIds.add(doc.id));
+  renderDocumentPicker();
+}
+
+function clearAllDocuments() {
+  selectedDocIds.clear();
+  renderDocumentPicker();
+}
+
+docSelectAllBtn.addEventListener("click", selectAllDocuments);
+docClearAllBtn.addEventListener("click", clearAllDocuments);
+
 function updateChatModeUI() {
   const isFullDocumentMode = chatModeSelect.value === "full-document";
   const isCompareMode = chatModeSelect.value === "compare";
@@ -242,7 +257,7 @@ function updateChatModeUI() {
   if (isFullDocumentMode) {
     debugSearchToggle.checked = false;
     rerankToggle.checked = false;
-    chatInput.placeholder = "Ask for a summary or analysis of the selected document...";
+    chatInput.placeholder = "Ask for a summary, comparison, or analysis of the selected documents...";
   } else if (isCompareMode) {
     chatInput.placeholder = "Enter a question to compare across selected models...";
   } else {
@@ -351,7 +366,7 @@ function resetConversation(resetServer = false) {
   chatLog.innerHTML = `
     <div class="msg msg-system">
       <span class="msg-avatar">&#9670;</span>
-      <div class="msg-body"><p>Hi! Upload a document, ask a question, or switch to Full document mode to summarize one selected file.</p></div>
+      <div class="msg-body"><p>Hi! Upload a document, ask a question, or switch to Full document mode to summarize one or more selected files.</p></div>
     </div>
   `;
   renderSources([]);
@@ -504,6 +519,14 @@ chatModeSelect.addEventListener("change", () => {
   resetConversation(true);
 });
 
+chatModeSelect.addEventListener("change", () => {
+  updateChatModeUI();
+  if (chatModeSelect.value === "full-document") {
+    selectAllDocuments();
+  }
+  resetConversation(true);
+});
+
 newSessionButton.addEventListener("click", () => {
   resetConversation(true);
 });
@@ -596,7 +619,7 @@ chatForm.addEventListener("submit", async (event) => {
   const isDebugSearch = debugSearchToggle.checked;
 
   if (chatMode === "full-document" && !state.documents.length) {
-    renderChatMessage("assistant", "Please upload a document first before using Full document mode.");
+    renderChatMessage("assistant", "Please upload at least one document first before using Full document mode.");
     return;
   }
 
@@ -609,6 +632,8 @@ chatForm.addEventListener("submit", async (event) => {
     renderChatMessage("assistant", "Select at least one model to compare.");
     return;
   }
+
+  const selectedDocumentIds = chatMode === "full-document" ? getSelectedDocumentIds() : [];
 
   renderChatMessage("user", question);
   chatInput.value = "";
@@ -655,7 +680,8 @@ chatForm.addEventListener("submit", async (event) => {
         history: state.history,
         apiKey,
         chatMode,
-        documentId: chatMode === "full-document" ? (getSelectedDocumentIds()[0] || "") : "",
+        documentId: chatMode === "full-document" ? (selectedDocumentIds[0] || "") : "",
+        documentIds: selectedDocumentIds,
         retrievalMode: retrievalModeSelect.value,
         rerank: isDebugSearch && rerankToggle.checked,
         rerankApiKey,
