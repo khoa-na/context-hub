@@ -118,8 +118,14 @@
               </label>
             </div>
             <div id="document-focus-row" class="document-focus-row" hidden>
-              <label for="document-focus-select">Target documents</label>
-              <select id="document-focus-select" multiple size="6"></select>
+              <div class="doc-picker-header">
+                <span>Target documents</span>
+                <div class="doc-picker-actions">
+                  <button id="doc-select-all-btn" type="button" class="doc-picker-btn">Select all</button>
+                  <button id="doc-clear-all-btn" type="button" class="doc-picker-btn">Clear all</button>
+                </div>
+              </div>
+              <div id="doc-picker-list" class="doc-picker-list"></div>
             </div>
             <textarea id="chat-input" rows="1" placeholder="Ask anything about your documents..."></textarea>
           </div>

@@ -419,30 +419,91 @@ button, textarea, input { font: inherit; color: inherit; }
 
 .document-focus-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   font-size: 0.8rem;
   color: var(--text-secondary);
 }
 
-.document-focus-row label {
+.doc-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.doc-picker-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.doc-picker-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.doc-picker-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.doc-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+}
+
+.doc-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.doc-picker-item:hover {
+  background: var(--bg-hover);
+}
+
+.doc-picker-item input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.doc-picker-title {
+  font-weight: 500;
+  font-size: 0.82rem;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.document-focus-row select {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  color: var(--text);
-  outline: none;
-}
-
-.document-focus-row select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
+.doc-picker-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .mode-select-row select:focus {
