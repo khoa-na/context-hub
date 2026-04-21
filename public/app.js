@@ -22,7 +22,9 @@ const retrievalModeSelect = document.querySelector("#retrieval-mode");
 const debugSearchToggle = document.querySelector("#debug-search-toggle");
 const rerankToggle = document.querySelector("#rerank-toggle");
 const documentFocusRow = document.querySelector("#document-focus-row");
-const documentFocusSelect = document.querySelector("#document-focus-select");
+const docPickerList = document.querySelector("#doc-picker-list");
+const docSelectAllBtn = document.querySelector("#doc-select-all-btn");
+const docClearAllBtn = document.querySelector("#doc-clear-all-btn");
 const chatLog = document.querySelector("#chat-log");
 const sourceList = document.querySelector("#source-list");
 const sourcesToggle = document.querySelector("#sources-toggle");
@@ -38,6 +40,7 @@ const wikiList = document.querySelector("#wiki-list");
 
 let sessionApiKey = "";
 let sessionJinaApiKey = "";
+let selectedDocIds = new Set();
 
 const dropzone = fileInput.closest(".dropzone");
 const wikiDropzone = wikiFileInput.closest(".dropzone");
@@ -117,9 +120,10 @@ function renderDocuments() {
           const err = await resp.json();
           throw new Error(err.error || "Delete failed");
         }
+        selectedDocIds.delete(id);
         state.documents = state.documents.filter((d) => d.id !== id);
         renderDocuments();
-        renderDocumentFocusOptions();
+        renderDocumentPicker();
         updateChatModeUI();
       } catch (err) {
         alert(err.message);
@@ -128,35 +132,52 @@ function renderDocuments() {
   });
 }
 
-function renderDocumentFocusOptions() {
+function renderDocumentPicker() {
   if (!state.documents.length) {
-    documentFocusSelect.innerHTML = '<option value="">No documents available</option>';
-    documentFocusSelect.disabled = true;
+    docPickerList.innerHTML = '<p class="empty-state">No documents available</p>';
     return;
   }
 
-  const currentValues = new Set(Array.from(documentFocusSelect.selectedOptions).map((option) => option.value));
-  documentFocusSelect.innerHTML = state.documents
-    .map((doc) => `<option value="${escapeHtml(doc.id)}">${escapeHtml(doc.title)} (${escapeHtml(doc.filename)})</option>`)
+  docPickerList.innerHTML = state.documents
+    .map((doc) => {
+      const checked = selectedDocIds.has(doc.id) ? "checked" : "";
+      return `
+        <label class="doc-picker-item">
+          <input type="checkbox" value="${escapeHtml(doc.id)}" ${checked} />
+          <span class="doc-picker-title">${escapeHtml(doc.title)}</span>
+          <span class="doc-picker-meta">${escapeHtml(doc.filename)} · ${doc.chunkCount} chunks</span>
+        </label>
+      `;
+    })
     .join("");
 
-  const options = Array.from(documentFocusSelect.options);
-  const selected = state.documents.filter((doc) => currentValues.has(doc.id));
-  if (selected.length) {
-    options.forEach((option) => {
-      option.selected = currentValues.has(option.value);
+  docPickerList.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.checked) {
+        selectedDocIds.add(cb.value);
+      } else {
+        selectedDocIds.delete(cb.value);
+      }
     });
-  } else if (options[0]) {
-    options[0].selected = true;
-  }
-  documentFocusSelect.disabled = false;
+  });
 }
 
 function getSelectedDocumentIds() {
-  return Array.from(documentFocusSelect.selectedOptions)
-    .map((option) => option.value)
-    .filter(Boolean);
+  return Array.from(selectedDocIds);
 }
+
+function selectAllDocuments() {
+  state.documents.forEach((doc) => selectedDocIds.add(doc.id));
+  renderDocumentPicker();
+}
+
+function clearAllDocuments() {
+  selectedDocIds.clear();
+  renderDocumentPicker();
+}
+
+docSelectAllBtn.addEventListener("click", selectAllDocuments);
+docClearAllBtn.addEventListener("click", clearAllDocuments);
 
 function updateChatModeUI() {
   const isFullDocumentMode = chatModeSelect.value === "full-document";
@@ -356,7 +377,7 @@ async function loadDocuments() {
   const payload = await response.json();
   state.documents = payload.documents || [];
   renderDocuments();
-  renderDocumentFocusOptions();
+  renderDocumentPicker();
   updateChatModeUI();
 }
 
@@ -429,10 +450,12 @@ chatModeSelect.addEventListener("change", () => {
   resetConversation(true);
 });
 
-documentFocusSelect.addEventListener("change", () => {
+chatModeSelect.addEventListener("change", () => {
+  updateChatModeUI();
   if (chatModeSelect.value === "full-document") {
-    resetConversation(true);
+    selectAllDocuments();
   }
+  resetConversation(true);
 });
 
 newSessionButton.addEventListener("click", () => {
