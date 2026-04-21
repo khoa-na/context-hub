@@ -753,6 +753,64 @@ button, textarea, input { font: inherit; color: inherit; }
   padding: 8px 0;
 }
 
+.compare-confidence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.confidence-stars {
+  color: #f59e0b;
+  font-size: 0.9rem;
+  letter-spacing: 1px;
+}
+
+.confidence-value {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.compare-key-points {
+  margin-top: 12px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.compare-key-points strong {
+  color: var(--text);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.compare-key-points ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.compare-key-points li {
+  margin-bottom: 3px;
+  line-height: 1.4;
+}
+
+.compare-meta {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.compare-meta span {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--bg-surface);
+  border-radius: 6px;
+  margin-right: 6px;
+}
+
 @media (max-width: 900px) {
   .app-layout { grid-template-columns: 1fr; }
   .sidebar {

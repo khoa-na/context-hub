@@ -871,7 +871,7 @@ function extractAnswerFromStructuredText(text) {
   return "";
 }
 
-async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputTokens, structuredOutput, systemInstruction }) {
+async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputTokens, structuredOutput, systemInstruction, jsonSchema }) {
   const generationConfig = {
     maxOutputTokens,
     temperature: 0.2,
@@ -879,7 +879,7 @@ async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputToken
 
   if (structuredOutput) {
     generationConfig.responseMimeType = "application/json";
-    generationConfig.responseJsonSchema = {
+    generationConfig.responseJsonSchema = jsonSchema || {
       type: "object",
       properties: {
         answer: {
@@ -1761,16 +1761,21 @@ async function handleModelCompare(req, res) {
         maxOutputTokens: task === "summarize" ? 1000 : 800,
         structuredOutput: true,
         systemInstruction: buildCompareSystemInstruction(taskInstruction),
+        jsonSchema: config.STRUCTURED_OUTPUT_SCHEMA,
       });
 
       const rawText = extractGeminiText(payload);
-      const answer = extractAnswerFromStructuredText(rawText) || rawText;
+      const parsed = parseStructuredAnswer(rawText);
       const latency = Date.now() - startTime;
 
       results.push({
         model: modelId,
         modelName: modelConfig.name,
-        answer: sanitizeModelAnswer(answer),
+        answer: parsed.answer,
+        confidence: parsed.confidence,
+        key_points: parsed.key_points,
+        word_count: parsed.word_count,
+        sources_used: parsed.sources_used,
         latency_ms: latency,
         tokens_used: payload.usageMetadata?.totalTokenCount || null,
       });
@@ -1790,6 +1795,35 @@ async function handleModelCompare(req, res) {
     chunkCount: ragChunks.length,
     results,
   });
+}
+
+function parseStructuredAnswer(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) {
+    return { answer: "", confidence: null, key_points: [], word_count: 0, sources_used: [] };
+  }
+
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        answer: sanitizeModelAnswer(typeof parsed.answer === "string" ? parsed.answer : text),
+        confidence: typeof parsed.confidence === "number" ? parsed.confidence : null,
+        key_points: Array.isArray(parsed.key_points) ? parsed.key_points : [],
+        word_count: typeof parsed.word_count === "number" ? parsed.word_count : null,
+        sources_used: Array.isArray(parsed.sources_used) ? parsed.sources_used : [],
+      };
+    }
+  } catch {}
+
+  return {
+    answer: sanitizeModelAnswer(text),
+    confidence: null,
+    key_points: [],
+    word_count: null,
+    sources_used: [],
+  };
 }
 
 function buildTaskInstruction(task) {

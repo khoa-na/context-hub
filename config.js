@@ -12,16 +12,12 @@ module.exports = {
   EMBEDDING_BATCH_DELAY_MS: 2000,
 
   MODELS: [
-    { id: "gemma-4-27b-it", name: "Gemma 4 27B", provider: "google" },
-    { id: "gemma-3-27b-it", name: "Gemma 3 27B", provider: "google" },
-    { id: "gemma-3-12b-it", name: "Gemma 3 12B", provider: "google" },
-    { id: "gemma-4-1b-it", name: "Gemma 4 1B", provider: "google" },
     { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", provider: "google" },
     { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "google" },
     { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "google" },
   ],
 
-  DEFAULT_MODEL: "gemma-4-27b-it",
+  DEFAULT_MODEL: "gemini-2.5-flash-lite",
 
   TASKS: [
     { id: "qa", name: "Q&A", description: "Answer questions based on documents" },

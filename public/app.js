@@ -716,6 +716,23 @@ function renderCompareResults(payload) {
       html += `<p class="compare-error-text">${escapeHtml(result.error)}</p>`;
     } else {
       html += `<div class="compare-answer">${escapeHtml(result.answer)}</div>`;
+
+      if (result.confidence) {
+        const stars = "★".repeat(result.confidence) + "☆".repeat(5 - result.confidence);
+        html += `<div class="compare-confidence"><span>Confidence:</span> <span class="confidence-stars">${stars}</span> <span class="confidence-value">${result.confidence}/5</span></div>`;
+      }
+
+      if (result.key_points && result.key_points.length) {
+        html += `<div class="compare-key-points"><strong>Key Points:</strong><ul>${result.key_points.map((kp) => `<li>${escapeHtml(kp)}</li>`).join("")}</ul></div>`;
+      }
+
+      if (result.word_count) {
+        html += `<div class="compare-meta"><span>Words: ${result.word_count}</span></div>`;
+      }
+
+      if (result.sources_used && result.sources_used.length) {
+        html += `<div class="compare-meta"><span>Sources: ${result.sources_used.map((s) => escapeHtml(s)).join(", ")}</span></div>`;
+      }
     }
 
     html += `</div>`;
