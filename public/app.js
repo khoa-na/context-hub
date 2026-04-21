@@ -1,6 +1,9 @@
 const state = {
   documents: [],
   history: [],
+  models: [],
+  selectedModels: new Set(),
+  selectedDocIds: new Set(),
 };
 
 const fileInput = document.querySelector("#file-input");
@@ -22,7 +25,13 @@ const retrievalModeSelect = document.querySelector("#retrieval-mode");
 const debugSearchToggle = document.querySelector("#debug-search-toggle");
 const rerankToggle = document.querySelector("#rerank-toggle");
 const documentFocusRow = document.querySelector("#document-focus-row");
-const documentFocusSelect = document.querySelector("#document-focus-select");
+const docPickerList = document.querySelector("#doc-picker-list");
+const docSelectAllBtn = document.querySelector("#doc-select-all-btn");
+const docClearAllBtn = document.querySelector("#doc-clear-all-btn");
+const modelCompareRow = document.querySelector("#model-compare-row");
+const modelSelectList = document.querySelector("#model-select-list");
+const taskSelect = document.querySelector("#task-select");
+const compareResults = document.querySelector("#compare-results");
 const chatLog = document.querySelector("#chat-log");
 const sourceList = document.querySelector("#source-list");
 const sourcesToggle = document.querySelector("#sources-toggle");
@@ -118,8 +127,9 @@ function renderDocuments() {
           throw new Error(err.error || "Delete failed");
         }
         state.documents = state.documents.filter((d) => d.id !== id);
+        state.selectedDocIds.delete(id);
         renderDocuments();
-        renderDocumentFocusOptions();
+        renderDocumentPicker();
         updateChatModeUI();
       } catch (err) {
         alert(err.message);
@@ -128,35 +138,113 @@ function renderDocuments() {
   });
 }
 
-function renderDocumentFocusOptions() {
+function renderDocumentPicker() {
   if (!state.documents.length) {
-    documentFocusSelect.innerHTML = '<option value="">No documents available</option>';
-    documentFocusSelect.disabled = true;
+    docPickerList.innerHTML = '<p class="empty-state">No documents available</p>';
     return;
   }
 
-  const currentValue = documentFocusSelect.value;
-  documentFocusSelect.innerHTML = state.documents
-    .map((doc) => `<option value="${escapeHtml(doc.id)}">${escapeHtml(doc.title)} (${escapeHtml(doc.filename)})</option>`)
+  docPickerList.innerHTML = state.documents
+    .map((doc) => {
+      const checked = state.selectedDocIds.has(doc.id) ? "checked" : "";
+      return `
+        <label class="doc-picker-item">
+          <input type="checkbox" value="${escapeHtml(doc.id)}" ${checked} />
+          <span class="doc-picker-title">${escapeHtml(doc.title)}</span>
+          <span class="doc-picker-meta">${escapeHtml(doc.filename)} · ${doc.chunkCount} chunks</span>
+        </label>
+      `;
+    })
     .join("");
 
-  const hasCurrent = state.documents.some((doc) => doc.id === currentValue);
-  documentFocusSelect.value = hasCurrent ? currentValue : state.documents[0].id;
-  documentFocusSelect.disabled = false;
+  docPickerList.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.checked) {
+        state.selectedDocIds.add(cb.value);
+      } else {
+        state.selectedDocIds.delete(cb.value);
+      }
+    });
+  });
+}
+
+function renderModelPicker() {
+  if (!state.models.length) {
+    modelSelectList.innerHTML = '<p class="empty-state">No models available</p>';
+    return;
+  }
+
+  modelSelectList.innerHTML = state.models
+    .map((model) => {
+      const checked = state.selectedModels.has(model.id) ? "checked" : "";
+      return `
+        <label class="model-picker-item">
+          <input type="checkbox" value="${escapeHtml(model.id)}" ${checked} />
+          <span class="model-picker-name">${escapeHtml(model.name)}</span>
+          <span class="model-picker-provider">${escapeHtml(model.provider)}</span>
+        </label>
+      `;
+    })
+    .join("");
+
+  modelSelectList.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.checked) {
+        state.selectedModels.add(cb.value);
+      } else {
+        state.selectedModels.delete(cb.value);
+      }
+    });
+  });
+}
+
+function selectAllDocuments() {
+  state.documents.forEach((doc) => state.selectedDocIds.add(doc.id));
+  renderDocumentPicker();
+}
+
+function clearAllDocuments() {
+  state.selectedDocIds.clear();
+  renderDocumentPicker();
+}
+
+function selectAllModels() {
+  state.models.forEach((model) => state.selectedModels.add(model.id));
+  renderModelPicker();
+}
+
+function clearAllModels() {
+  state.selectedModels.clear();
+  renderModelPicker();
+}
+
+docSelectAllBtn.addEventListener("click", selectAllDocuments);
+docClearAllBtn.addEventListener("click", clearAllDocuments);
+
+function getSelectedDocumentIds() {
+  return Array.from(state.selectedDocIds);
+}
+
+function getSelectedModelIds() {
+  return Array.from(state.selectedModels);
 }
 
 function updateChatModeUI() {
   const isFullDocumentMode = chatModeSelect.value === "full-document";
+  const isCompareMode = chatModeSelect.value === "compare";
 
   documentFocusRow.hidden = !isFullDocumentMode;
-  retrievalModeSelect.disabled = isFullDocumentMode;
-  debugSearchToggle.disabled = isFullDocumentMode;
-  rerankToggle.disabled = isFullDocumentMode;
+  modelCompareRow.hidden = !isCompareMode;
+  retrievalModeSelect.disabled = isCompareMode;
+  debugSearchToggle.disabled = isCompareMode;
+  rerankToggle.disabled = isCompareMode;
 
   if (isFullDocumentMode) {
     debugSearchToggle.checked = false;
     rerankToggle.checked = false;
     chatInput.placeholder = "Ask for a summary or analysis of the selected document...";
+  } else if (isCompareMode) {
+    chatInput.placeholder = "Enter a question to compare across selected models...";
   } else {
     chatInput.placeholder = "Ask anything about your documents...";
   }
@@ -343,7 +431,7 @@ async function loadDocuments() {
   const payload = await response.json();
   state.documents = payload.documents || [];
   renderDocuments();
-  renderDocumentFocusOptions();
+  renderDocumentPicker();
   updateChatModeUI();
 }
 
@@ -414,12 +502,6 @@ showKeyToggle.addEventListener("change", () => {
 chatModeSelect.addEventListener("change", () => {
   updateChatModeUI();
   resetConversation(true);
-});
-
-documentFocusSelect.addEventListener("change", () => {
-  if (chatModeSelect.value === "full-document") {
-    resetConversation(true);
-  }
 });
 
 newSessionButton.addEventListener("click", () => {
@@ -518,8 +600,13 @@ chatForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  if (chatMode === "full-document" && !documentFocusSelect.value) {
-    renderChatMessage("assistant", "Select a target document before using Full document mode.");
+  if (chatMode === "full-document" && state.selectedDocIds.size === 0) {
+    renderChatMessage("assistant", "Select one or more target documents before using Full document mode.");
+    return;
+  }
+
+  if (chatMode === "compare" && state.selectedModels.size === 0) {
+    renderChatMessage("assistant", "Select at least one model to compare.");
     return;
   }
 
@@ -530,6 +617,32 @@ chatForm.addEventListener("submit", async (event) => {
   try {
     const apiKey = apiKeyInput.value.trim() || sessionApiKey;
     const rerankApiKey = jinaApiKeyInput.value.trim() || sessionJinaApiKey;
+
+    if (chatMode === "compare") {
+      compareResults.classList.remove("hidden");
+      compareResults.innerHTML = '<p class="compare-loading">Running comparison across selected models...</p>';
+
+      const response = await fetch("/api/compare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          apiKey,
+          models: getSelectedModelIds(),
+          task: taskSelect.value,
+          retrievalMode: retrievalModeSelect.value,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Model comparison failed.");
+      }
+
+      renderCompareResults(payload);
+      return;
+    }
+
     const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
 
     renderChatMessage("assistant", isDebugSearch ? "Searching..." : chatMode === "full-document" ? "Reading the full document..." : "Thinking...");
@@ -542,7 +655,7 @@ chatForm.addEventListener("submit", async (event) => {
         history: state.history,
         apiKey,
         chatMode,
-        documentId: chatMode === "full-document" ? documentFocusSelect.value : "",
+        documentId: chatMode === "full-document" ? (getSelectedDocumentIds()[0] || "") : "",
         retrievalMode: retrievalModeSelect.value,
         rerank: isDebugSearch && rerankToggle.checked,
         rerankApiKey,
@@ -576,8 +689,58 @@ chatInput.addEventListener("input", () => {
   chatInput.style.height = Math.min(chatInput.scrollHeight, 160) + "px";
 });
 
+function renderCompareResults(payload) {
+  const results = payload.results || [];
+  const question = payload.question || "";
+
+  let html = `
+    <div class="compare-header">
+      <h3>Model Comparison</h3>
+      <p class="compare-question">"${escapeHtml(question)}"</p>
+    </div>
+    <div class="compare-grid">
+  `;
+
+  for (const result of results) {
+    const isError = !!result.error;
+    html += `
+      <div class="compare-card ${isError ? "compare-error" : ""}">
+        <div class="compare-card-header">
+          <strong class="compare-model-name">${escapeHtml(result.modelName || result.model)}</strong>
+          <span class="compare-latency">${result.latency_ms ? `${result.latency_ms}ms` : ""}</span>
+          ${result.tokens_used ? `<span class="compare-tokens">${result.tokens_used} tokens</span>` : ""}
+        </div>
+    `;
+
+    if (isError) {
+      html += `<p class="compare-error-text">${escapeHtml(result.error)}</p>`;
+    } else {
+      html += `<div class="compare-answer">${escapeHtml(result.answer)}</div>`;
+    }
+
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  compareResults.innerHTML = html;
+}
+
+async function loadModels() {
+  try {
+    const response = await fetch("/api/models");
+    const payload = await response.json();
+    state.models = payload.models || [];
+    if (state.models.length > 0) {
+      state.selectedModels.add(state.models[0].id);
+    }
+    renderModelPicker();
+  } catch (error) {
+    console.error("Failed to load models:", error.message);
+  }
+}
 hydrateApiKey();
 updateChatModeUI();
 updateSelectedFileUI();
 loadDocuments().catch((error) => { uploadStatus.textContent = error.message; });
 loadWikiFiles();
+loadModels();

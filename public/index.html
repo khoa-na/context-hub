@@ -89,7 +89,7 @@
           <div class="msg msg-system">
             <span class="msg-avatar">&#9670;</span>
             <div class="msg-body">
-              <p>Hi! Upload a document or ask a question. I search across all your docs using hybrid retrieval.</p>
+              <p>Hi! Upload documents or ask a question. I can search across all your docs or compare LLM models side by side.</p>
             </div>
           </div>
         </div>
@@ -101,6 +101,7 @@
               <select id="chat-mode">
                 <option value="qa" selected>Q&A</option>
                 <option value="full-document">Full document</option>
+                <option value="compare">Model Compare</option>
               </select>
               <span>Search mode</span>
               <select id="retrieval-mode">
@@ -118,8 +119,30 @@
               </label>
             </div>
             <div id="document-focus-row" class="document-focus-row" hidden>
-              <label for="document-focus-select">Target document</label>
-              <select id="document-focus-select"></select>
+              <div class="doc-picker-header">
+                <span>Target documents</span>
+                <div class="doc-picker-actions">
+                  <button id="doc-select-all-btn" type="button" class="doc-picker-btn">Select all</button>
+                  <button id="doc-clear-all-btn" type="button" class="doc-picker-btn">Clear all</button>
+                </div>
+              </div>
+              <div id="doc-picker-list" class="doc-picker-list"></div>
+            </div>
+            <div id="model-compare-row" class="model-compare-row" hidden>
+              <div class="compare-header">
+                <span>Compare models</span>
+              </div>
+              <div id="model-select-list" class="model-select-list"></div>
+              <div class="task-select-row">
+                <span>Task</span>
+                <select id="task-select">
+                  <option value="qa">Q&A</option>
+                  <option value="summarize">Summarize</option>
+                  <option value="extract">Extract</option>
+                  <option value="compare">Compare</option>
+                  <option value="evaluate">Evaluate</option>
+                </select>
+              </div>
             </div>
             <textarea id="chat-input" rows="1" placeholder="Ask anything about your documents..."></textarea>
           </div>
@@ -135,6 +158,8 @@
           </button>
           <div id="source-list" class="source-list collapsed"></div>
         </div>
+
+        <div id="compare-results" class="compare-results hidden"></div>
       </section>
     </main>
 
