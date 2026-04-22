@@ -47,7 +47,6 @@ const wikiList = document.querySelector("#wiki-list");
 
 let sessionApiKey = "";
 let sessionJinaApiKey = "";
-let selectedDocIds = new Set();
 
 const dropzone = fileInput.closest(".dropzone");
 const wikiDropzone = wikiFileInput.closest(".dropzone");
@@ -127,7 +126,6 @@ function renderDocuments() {
           const err = await resp.json();
           throw new Error(err.error || "Delete failed");
         }
-        selectedDocIds.delete(id);
         state.documents = state.documents.filter((d) => d.id !== id);
         state.selectedDocIds.delete(id);
         renderDocuments();
@@ -230,19 +228,6 @@ function getSelectedDocumentIds() {
 function getSelectedModelIds() {
   return Array.from(state.selectedModels);
 }
-
-function selectAllDocuments() {
-  state.documents.forEach((doc) => selectedDocIds.add(doc.id));
-  renderDocumentPicker();
-}
-
-function clearAllDocuments() {
-  selectedDocIds.clear();
-  renderDocumentPicker();
-}
-
-docSelectAllBtn.addEventListener("click", selectAllDocuments);
-docClearAllBtn.addEventListener("click", clearAllDocuments);
 
 function updateChatModeUI() {
   const isFullDocumentMode = chatModeSelect.value === "full-document";

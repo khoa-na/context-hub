@@ -3,6 +3,7 @@ const http = require("http");
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
+const config = require("./config");
 const { MIME_TYPES, PUBLIC_DIR } = require("./constants");
 const { sendJson } = require("./lib/http");
 const { ensureStorage } = require("./lib/storage");
