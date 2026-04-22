@@ -3,6 +3,7 @@ const http = require("http");
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
+const config = require("./config");
 const { MIME_TYPES, PUBLIC_DIR } = require("./constants");
 const { sendJson } = require("./lib/http");
 const { ensureStorage } = require("./lib/storage");
@@ -19,6 +20,7 @@ const {
   handleWikiList,
   handleSaveKey,
   handleSaveJinaKey,
+  handleModelCompare,
 } = require("./handlers/api");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -90,6 +92,18 @@ async function router(req, res) {
 
     if (req.method === "POST" && url.pathname === "/api/reindex") {
       return handleReindex(req, res);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/compare") {
+      return handleModelCompare(req, res);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/models") {
+      return sendJson(res, 200, { models: config.MODELS });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/tasks") {
+      return sendJson(res, 200, { tasks: config.TASKS });
     }
 
     if (req.method === "GET") {

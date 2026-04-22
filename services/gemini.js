@@ -200,7 +200,7 @@ function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceS
     .join("\n\n");
 }
 
-async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputTokens, structuredOutput, systemInstruction }) {
+async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputTokens, structuredOutput, systemInstruction, jsonSchema }) {
   const generationConfig = {
     maxOutputTokens,
     temperature: 0.2,
@@ -208,7 +208,7 @@ async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputToken
 
   if (structuredOutput) {
     generationConfig.responseMimeType = "application/json";
-    generationConfig.responseJsonSchema = {
+    generationConfig.responseJsonSchema = jsonSchema || {
       type: "object",
       properties: {
         answer: {
@@ -386,4 +386,7 @@ module.exports = {
   buildFullDocumentSynthesisPrompt,
   generateGeminiAnswer,
   generateChunkTitles,
+  postGeminiGenerateContent,
+  extractGeminiText,
+  sanitizeModelAnswer,
 };

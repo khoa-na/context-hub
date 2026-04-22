@@ -85,14 +85,14 @@
       </aside>
 
       <section class="chat-area">
-          <div id="chat-log" class="chat-log">
-            <div class="msg msg-system">
-              <span class="msg-avatar">&#9670;</span>
-              <div class="msg-body">
-                <p>Hi! Upload documents or ask a question. I can search across all your docs or read one or more selected files in Full document mode.</p>
-              </div>
+        <div id="chat-log" class="chat-log">
+          <div class="msg msg-system">
+            <span class="msg-avatar">&#9670;</span>
+            <div class="msg-body">
+              <p>Hi! Upload documents or ask a question. I can search across all your docs, read full documents, or compare LLM models side by side.</p>
             </div>
           </div>
+        </div>
 
         <form id="chat-form" class="chat-input-bar">
           <div class="chat-input-stack">
@@ -101,6 +101,7 @@
               <select id="chat-mode">
                 <option value="qa" selected>Q&A</option>
                 <option value="full-document">Full document</option>
+                <option value="compare">Model Compare</option>
               </select>
               <span>Search mode</span>
               <select id="retrieval-mode">
@@ -127,6 +128,22 @@
               </div>
               <div id="doc-picker-list" class="doc-picker-list"></div>
             </div>
+            <div id="model-compare-row" class="model-compare-row" hidden>
+              <div class="compare-header">
+                <span>Compare models</span>
+              </div>
+              <div id="model-select-list" class="model-select-list"></div>
+              <div class="task-select-row">
+                <span>Task</span>
+                <select id="task-select">
+                  <option value="qa">Q&A</option>
+                  <option value="summarize">Summarize</option>
+                  <option value="extract">Extract</option>
+                  <option value="compare">Compare</option>
+                  <option value="evaluate">Evaluate</option>
+                </select>
+              </div>
+            </div>
             <textarea id="chat-input" rows="1" placeholder="Ask anything about your documents..."></textarea>
           </div>
           <button class="btn-send" type="submit" aria-label="Send">
@@ -141,6 +158,8 @@
           </button>
           <div id="source-list" class="source-list collapsed"></div>
         </div>
+
+        <div id="compare-results" class="compare-results hidden"></div>
       </section>
     </main>
 
