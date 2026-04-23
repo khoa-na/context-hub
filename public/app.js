@@ -228,8 +228,13 @@ function renderChatMessage(role, content) {
 
 function buildStructuredAnswerHtml(payload) {
   const answer = extractRenderedAnswer(payload);
+  const rawModelText = typeof payload?.rawModelText === "string" ? payload.rawModelText.trim() : "";
   const citations = Array.isArray(payload?.structured?.citations) ? payload.structured.citations : [];
   const followUpQuestions = Array.isArray(payload?.structured?.follow_up_questions) ? payload.structured.follow_up_questions : [];
+
+  if (!answer && rawModelText) {
+    return `<p>${escapeHtml(rawModelText)}</p>`;
+  }
 
   let html = `<p>${escapeHtml(answer)}</p>`;
 
@@ -664,7 +669,7 @@ chatForm.addEventListener("submit", async (event) => {
     if (lastMsgBody) {
       if (isDebugSearch) {
         lastMsgBody.innerHTML = `<p>${escapeHtml(buildSearchDebugSummary(payload))}</p>`;
-      } else if (payload.structured) {
+      } else if (payload.structured || (typeof payload.rawModelText === "string" && payload.rawModelText.trim())) {
         lastMsgBody.innerHTML = buildStructuredAnswerHtml(payload);
       } else if (lastMsg) {
         lastMsg.textContent = renderedAnswer;

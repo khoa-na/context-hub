@@ -180,6 +180,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
   const combinedMarkdownLength = selectedDocuments.reduce((sum, doc) => sum + doc.markdown.length, 0);
   let answer;
   let structured = null;
+  let rawModelText = "";
   let sliceCount = 1;
 
   if (combinedMarkdownLength <= fullDocCharBudget) {
@@ -192,6 +193,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
     });
     answer = response.answer;
     structured = response.structured;
+    rawModelText = response.rawText || "";
   } else {
     const blocks = buildDocumentSliceBlocks(selectedDocuments);
     const slices = packDocumentBlocksIntoSlices(blocks);
@@ -229,11 +231,13 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
     });
     answer = response.answer;
     structured = response.structured;
+    rawModelText = response.rawText || "";
   }
 
   return {
     answer,
     structured,
+    rawModelText,
     chunks: selectedDocuments.map(buildFullDocumentSource),
     retrievalMode: "full-document",
     chatMode: "full-document",
@@ -301,6 +305,7 @@ async function callGemini({ question, history, apiKey: requestApiKey, model, ten
   return {
     answer: response.answer,
     structured: response.structured,
+    rawModelText: response.rawText || "",
     chunks: ragChunks,
     retrievalMode: selectedRetrievalMode,
   };
