@@ -1,3 +1,5 @@
+const config = require("../config");
+
 function extractGeminiText(payload) {
   const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
   const texts = [];
@@ -69,24 +71,6 @@ function sanitizeModelAnswer(answer) {
   }
 
   return normalized;
-}
-
-function extractAnswerFromStructuredText(text) {
-  const raw = String(text || "").trim();
-  if (!raw) {
-    return "";
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed?.answer === "string" && parsed.answer.trim()) {
-      return parsed.answer.trim();
-    }
-  } catch {
-    return "";
-  }
-
-  return "";
 }
 
 function buildGeminiSystemInstruction() {
@@ -200,25 +184,11 @@ function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceS
     .join("\n\n");
 }
 
-async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputTokens, structuredOutput, systemInstruction, jsonSchema }) {
+async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputTokens, systemInstruction }) {
   const generationConfig = {
     maxOutputTokens,
     temperature: 0.2,
   };
-
-  if (structuredOutput) {
-    generationConfig.responseMimeType = "application/json";
-    generationConfig.responseJsonSchema = jsonSchema || {
-      type: "object",
-      properties: {
-        answer: {
-          type: "string",
-          description: "Final user-facing answer only, with no analysis or extra metadata.",
-        },
-      },
-      required: ["answer"],
-    };
-  }
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -265,42 +235,18 @@ async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputToken
   return payload;
 }
 
-async function generateGeminiAnswer({ apiKey, prompt, maxOutputTokens = 700, systemInstruction = buildGeminiSystemInstruction() }) {
-  const model = process.env.GEMINI_MODEL || "gemma-4-31b-it";
-  let payload;
-  let structuredOutput = true;
-
-  try {
-    payload = await postGeminiGenerateContent({
-      apiKey,
-      model,
-      prompt,
-      maxOutputTokens,
-      structuredOutput,
-      systemInstruction,
-    });
-  } catch (error) {
-    const unsupportedStructuredOutput =
-      error.statusCode === 400 &&
-      /(responsemimetype|responsejsonschema|json|schema|unsupported)/i.test(error.message);
-
-    if (unsupportedStructuredOutput) {
-      structuredOutput = false;
-      payload = await postGeminiGenerateContent({
-        apiKey,
-        model,
-        prompt,
-        maxOutputTokens,
-        structuredOutput,
-        systemInstruction,
-      });
-    } else {
-      throw error;
-    }
-  }
+async function generateGeminiAnswer({ apiKey, model: requestedModel, prompt, maxOutputTokens = 700, systemInstruction = buildGeminiSystemInstruction() }) {
+  const model = requestedModel || process.env.GEMINI_MODEL || config.DEFAULT_MODEL || "gemma-4-31b-it";
+  const payload = await postGeminiGenerateContent({
+    apiKey,
+    model,
+    prompt,
+    maxOutputTokens,
+    systemInstruction,
+  });
 
   const rawText = extractGeminiText(payload);
-  const answer = sanitizeModelAnswer(extractAnswerFromStructuredText(rawText) || rawText);
+  const answer = sanitizeModelAnswer(rawText);
   if (!answer) {
     const blockReason = payload?.promptFeedback?.blockReason;
     if (blockReason) {
@@ -319,7 +265,7 @@ async function generateChunkTitles(chunks, apiKey) {
   }
 
   const batchSize = 10;
-  const model = process.env.GEMINI_MODEL || "gemma-4-31b-it";
+  const model = process.env.GEMINI_MODEL || config.DEFAULT_MODEL || "gemma-4-31b-it";
 
   for (let i = 0; i < chunks.length; i += batchSize) {
     const batch = chunks.slice(i, i + batchSize);
@@ -343,11 +289,10 @@ async function generateChunkTitles(chunks, apiKey) {
         model,
         prompt,
         maxOutputTokens: 1024,
-        structuredOutput: true,
       });
 
       const rawText = extractGeminiText(payload);
-      const answer = extractAnswerFromStructuredText(rawText) || rawText;
+      const answer = rawText;
 
       let titles;
       try {

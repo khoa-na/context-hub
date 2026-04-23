@@ -2,7 +2,7 @@ const state = {
   documents: [],
   history: [],
   models: [],
-  selectedModels: new Set(),
+  selectedModel: "",
   selectedDocIds: new Set(),
 };
 
@@ -21,6 +21,7 @@ const jinaKeyStatus = document.querySelector("#jina-key-status");
 const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
 const chatModeSelect = document.querySelector("#chat-mode");
+const modelSelect = document.querySelector("#model-select");
 const retrievalModeSelect = document.querySelector("#retrieval-mode");
 const debugSearchToggle = document.querySelector("#debug-search-toggle");
 const rerankToggle = document.querySelector("#rerank-toggle");
@@ -28,10 +29,6 @@ const documentFocusRow = document.querySelector("#document-focus-row");
 const docPickerList = document.querySelector("#doc-picker-list");
 const docSelectAllBtn = document.querySelector("#doc-select-all-btn");
 const docClearAllBtn = document.querySelector("#doc-clear-all-btn");
-const modelCompareRow = document.querySelector("#model-compare-row");
-const modelSelectList = document.querySelector("#model-select-list");
-const taskSelect = document.querySelector("#task-select");
-const compareResults = document.querySelector("#compare-results");
 const chatLog = document.querySelector("#chat-log");
 const sourceList = document.querySelector("#source-list");
 const sourcesToggle = document.querySelector("#sources-toggle");
@@ -168,54 +165,30 @@ function renderDocumentPicker() {
   });
 }
 
-function renderModelPicker() {
-  if (!state.models.length) {
-    modelSelectList.innerHTML = '<p class="empty-state">No models available</p>';
-    return;
-  }
-
-  modelSelectList.innerHTML = state.models
-    .map((model) => {
-      const checked = state.selectedModels.has(model.id) ? "checked" : "";
-      return `
-        <label class="model-picker-item">
-          <input type="checkbox" value="${escapeHtml(model.id)}" ${checked} />
-          <span class="model-picker-name">${escapeHtml(model.name)}</span>
-          <span class="model-picker-provider">${escapeHtml(model.provider)}</span>
-        </label>
-      `;
-    })
-    .join("");
-
-  modelSelectList.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      if (cb.checked) {
-        state.selectedModels.add(cb.value);
-      } else {
-        state.selectedModels.delete(cb.value);
-      }
-    });
-  });
-}
-
 function selectAllDocuments() {
   state.documents.forEach((doc) => state.selectedDocIds.add(doc.id));
   renderDocumentPicker();
 }
 
+function renderModelOptions() {
+  if (!state.models.length) {
+    modelSelect.innerHTML = '<option value="">No models available</option>';
+    modelSelect.disabled = true;
+    return;
+  }
+
+  modelSelect.disabled = false;
+  modelSelect.innerHTML = state.models
+    .map((model) => {
+      const selected = model.id === state.selectedModel ? "selected" : "";
+      return `<option value="${escapeHtml(model.id)}" ${selected}>${escapeHtml(model.name)}</option>`;
+    })
+    .join("");
+}
+
 function clearAllDocuments() {
   state.selectedDocIds.clear();
   renderDocumentPicker();
-}
-
-function selectAllModels() {
-  state.models.forEach((model) => state.selectedModels.add(model.id));
-  renderModelPicker();
-}
-
-function clearAllModels() {
-  state.selectedModels.clear();
-  renderModelPicker();
 }
 
 docSelectAllBtn.addEventListener("click", selectAllDocuments);
@@ -225,26 +198,18 @@ function getSelectedDocumentIds() {
   return Array.from(state.selectedDocIds);
 }
 
-function getSelectedModelIds() {
-  return Array.from(state.selectedModels);
-}
-
 function updateChatModeUI() {
   const isFullDocumentMode = chatModeSelect.value === "full-document";
-  const isCompareMode = chatModeSelect.value === "compare";
 
   documentFocusRow.hidden = !isFullDocumentMode;
-  modelCompareRow.hidden = !isCompareMode;
-  retrievalModeSelect.disabled = isCompareMode;
-  debugSearchToggle.disabled = isCompareMode;
-  rerankToggle.disabled = isCompareMode;
+  retrievalModeSelect.disabled = false;
+  debugSearchToggle.disabled = false;
+  rerankToggle.disabled = false;
 
   if (isFullDocumentMode) {
     debugSearchToggle.checked = false;
     rerankToggle.checked = false;
     chatInput.placeholder = "Ask for a summary, comparison, or analysis of the selected documents...";
-  } else if (isCompareMode) {
-    chatInput.placeholder = "Enter a question to compare across selected models...";
   } else {
     chatInput.placeholder = "Ask anything about your documents...";
   }
@@ -499,6 +464,10 @@ showKeyToggle.addEventListener("change", () => {
   jinaApiKeyInput.type = showKeyToggle.checked ? "text" : "password";
 });
 
+modelSelect.addEventListener("change", () => {
+  state.selectedModel = modelSelect.value;
+});
+
 chatModeSelect.addEventListener("change", () => {
   updateChatModeUI();
   resetConversation(true);
@@ -613,11 +582,6 @@ chatForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  if (chatMode === "compare" && state.selectedModels.size === 0) {
-    renderChatMessage("assistant", "Select at least one model to compare.");
-    return;
-  }
-
   const selectedDocumentIds = chatMode === "full-document" ? getSelectedDocumentIds() : [];
 
   renderChatMessage("user", question);
@@ -627,31 +591,6 @@ chatForm.addEventListener("submit", async (event) => {
   try {
     const apiKey = apiKeyInput.value.trim() || sessionApiKey;
     const rerankApiKey = jinaApiKeyInput.value.trim() || sessionJinaApiKey;
-
-    if (chatMode === "compare") {
-      compareResults.classList.remove("hidden");
-      compareResults.innerHTML = '<p class="compare-loading">Running comparison across selected models...</p>';
-
-      const response = await fetch("/api/compare", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question,
-          apiKey,
-          models: getSelectedModelIds(),
-          task: taskSelect.value,
-          retrievalMode: retrievalModeSelect.value,
-        }),
-      });
-
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || "Model comparison failed.");
-      }
-
-      renderCompareResults(payload);
-      return;
-    }
 
     const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
 
@@ -664,6 +603,7 @@ chatForm.addEventListener("submit", async (event) => {
         question,
         history: state.history,
         apiKey,
+        model: state.selectedModel,
         chatMode,
         documentId: chatMode === "full-document" ? (selectedDocumentIds[0] || "") : "",
         documentIds: selectedDocumentIds,
@@ -700,72 +640,19 @@ chatInput.addEventListener("input", () => {
   chatInput.style.height = Math.min(chatInput.scrollHeight, 160) + "px";
 });
 
-function renderCompareResults(payload) {
-  const results = payload.results || [];
-  const question = payload.question || "";
-
-  let html = `
-    <div class="compare-header">
-      <h3>Model Comparison</h3>
-      <p class="compare-question">"${escapeHtml(question)}"</p>
-    </div>
-    <div class="compare-grid">
-  `;
-
-  for (const result of results) {
-    const isError = !!result.error;
-    html += `
-      <div class="compare-card ${isError ? "compare-error" : ""}">
-        <div class="compare-card-header">
-          <strong class="compare-model-name">${escapeHtml(result.modelName || result.model)}</strong>
-          <span class="compare-latency">${result.latency_ms ? `${result.latency_ms}ms` : ""}</span>
-          ${result.tokens_used ? `<span class="compare-tokens">${result.tokens_used} tokens</span>` : ""}
-        </div>
-    `;
-
-    if (isError) {
-      html += `<p class="compare-error-text">${escapeHtml(result.error)}</p>`;
-    } else {
-      html += `<div class="compare-answer">${escapeHtml(result.answer)}</div>`;
-
-      if (result.confidence) {
-        const stars = "★".repeat(result.confidence) + "☆".repeat(5 - result.confidence);
-        html += `<div class="compare-confidence"><span>Confidence:</span> <span class="confidence-stars">${stars}</span> <span class="confidence-value">${result.confidence}/5</span></div>`;
-      }
-
-      if (result.key_points && result.key_points.length) {
-        html += `<div class="compare-key-points"><strong>Key Points:</strong><ul>${result.key_points.map((kp) => `<li>${escapeHtml(kp)}</li>`).join("")}</ul></div>`;
-      }
-
-      if (result.word_count) {
-        html += `<div class="compare-meta"><span>Words: ${result.word_count}</span></div>`;
-      }
-
-      if (result.sources_used && result.sources_used.length) {
-        html += `<div class="compare-meta"><span>Sources: ${result.sources_used.map((s) => escapeHtml(s)).join(", ")}</span></div>`;
-      }
-    }
-
-    html += `</div>`;
-  }
-
-  html += `</div>`;
-  compareResults.innerHTML = html;
-}
-
 async function loadModels() {
   try {
     const response = await fetch("/api/models");
     const payload = await response.json();
     state.models = payload.models || [];
-    if (state.models.length > 0) {
-      state.selectedModels.add(state.models[0].id);
-    }
-    renderModelPicker();
+    state.selectedModel = payload.defaultModel || state.models[0]?.id || "";
+    renderModelOptions();
   } catch (error) {
     console.error("Failed to load models:", error.message);
+    renderModelOptions();
   }
 }
+
 hydrateApiKey();
 updateChatModeUI();
 updateSelectedFileUI();

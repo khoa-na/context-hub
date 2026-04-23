@@ -6,7 +6,6 @@ This branch includes:
 - modularized server-side code (`handlers/`, `services/`, `lib/`)
 - retrieval-based Q&A across uploaded documents
 - full-document mode for one or more selected documents
-- model comparison mode with task-oriented structured output
 
 ## Features
 
@@ -16,9 +15,7 @@ This branch includes:
 - Parent-child retrieval: search on child chunks, answer with parent section context
 - Gemini-generated chunk titles for better contextual embeddings
 - Full-document mode for up to 5 selected documents at a time
-- Model comparison mode across configured Gemini models
-- Task modes for compare runs: `qa`, `summarize`, `extract`, `compare`, `evaluate`
-- Structured-output parsing for compare results (`answer`, `confidence`, `key_points`, optional metadata)
+- Chat model selector with 2 Gemma 4 options: `gemma-4-31b-it` and `gemma-4-26b-a4b-it`
 - Retrieval-only debug mode via `/api/search`
 - Optional Jina rerank in debug mode
 - Save Gemini and Jina API keys from the UI into `.env`
@@ -60,16 +57,6 @@ Question + selected documents
   -> synthesize a final whole-document answer
 ```
 
-### Model comparison flow
-
-```text
-Question + selected models + task
-  -> build retrieval context once
-  -> send same context to each configured model
-  -> request structured JSON output
-  -> parse and render answers side by side
-```
-
 ### Debug retrieval flow
 
 ```text
@@ -86,10 +73,9 @@ The app is now split by responsibility instead of keeping most logic inside one 
 
 ```text
 server.js                  HTTP bootstrap, static serving, routing
-handlers/api.js            HTTP handlers for upload, chat, search, compare, wiki, reindex
+handlers/api.js            HTTP handlers for upload, chat, search, wiki, reindex
 services/chat.js           Retrieval Q&A and full-document orchestration
-services/compare.js        Side-by-side model comparison with task modes
-services/gemini.js         Prompt builders, Gemini client calls, structured-output helpers
+services/gemini.js         Prompt builders and Gemini client calls
 services/indexing.js       Document indexing and reindexing workflow
 db.js                      LanceDB indexing and retrieval (BM25, semantic, hybrid RRF)
 embedding.js               Gemini embedding API client
@@ -100,7 +86,7 @@ lib/storage.js             Local metadata, wiki loading, env persistence
 lib/session.js             Cookie-backed session history storage
 lib/http.js                JSON/body parsing helpers
 lib/uploads.js             Multipart upload parsing
-config.js                  Retrieval budgets, compare models, task catalog
+config.js                  Retrieval budgets, embedding settings, local paths
 constants.js               Paths, MIME types, upload/session constants
 public/                    Frontend (HTML, CSS, vanilla JS)
 wiki/default/              Static Markdown always injected into prompts
@@ -164,28 +150,6 @@ If `HOST=0.0.0.0`, startup logs will also print LAN URLs such as `http://192.168
 - Useful for summaries, synthesis, and cross-document analysis
 - Current server-side limit: 5 selected documents
 
-### Model Compare
-
-- Runs the same question against selected configured models
-- Supports task-oriented prompting
-- Renders side-by-side responses with structured metadata when available
-
-## Configured Compare Models
-
-The compare UI reads its model list from `config.js`.
-
-Current defaults:
-- `gemini-2.5-flash-lite`
-- `gemini-2.5-flash`
-- `gemini-2.5-pro`
-
-Current task catalog:
-- `qa`
-- `summarize`
-- `extract`
-- `compare`
-- `evaluate`
-
 ## API Endpoints
 
 | Endpoint | Method | Description |
@@ -193,16 +157,14 @@ Current task catalog:
 | `/api/upload` | POST | Upload a file, convert to Markdown, and optionally index it |
 | `/api/chat` | POST | Retrieval Q&A or full-document answer generation |
 | `/api/search` | POST | Retrieval-only debug endpoint with optional Jina rerank |
-| `/api/compare` | POST | Run the same question against multiple configured models |
 | `/api/documents` | GET | List uploaded document metadata |
 | `/api/documents/:id` | DELETE | Delete a document and remove its indexed chunks |
 | `/api/wiki-upload` | POST | Upload a `.md` / `.txt` file into `wiki/default/` |
 | `/api/wiki-list` | GET | List wiki files |
 | `/api/reindex` | POST | Re-index all documents |
+| `/api/models` | GET | Return the configured chat-model options |
 | `/api/save-key` | POST | Save `GEMINI_API_KEY` into `.env` |
 | `/api/save-jina-key` | POST | Save `JINA_API_KEY` into `.env` |
-| `/api/models` | GET | Return the configured model catalog for compare mode |
-| `/api/tasks` | GET | Return the configured task catalog for compare mode |
 | `/api/session/reset` | POST | Start a fresh local chat session |
 
 ## Example Request Shapes
@@ -219,23 +181,11 @@ Current task catalog:
 }
 ```
 
-### `/api/compare`
-
-```json
-{
-  "question": "So sanh hai bao cao nay",
-  "apiKey": "your-gemini-key",
-  "models": ["gemini-2.5-flash-lite", "gemini-2.5-pro"],
-  "task": "compare",
-  "retrievalMode": "hybrid"
-}
-```
-
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | — | Required for semantic retrieval, indexing, chat generation, and compare mode |
+| `GEMINI_API_KEY` | — | Required for semantic retrieval, indexing, and chat generation |
 | `JINA_API_KEY` | — | Optional. Required only for Jina rerank |
 | `GEMINI_MODEL` | `gemma-4-31b-it` | Default answer-generation model used by `services/gemini.js` |
 | `JINA_RERANK_MODEL` | `jina-reranker-v2-base-multilingual` | Jina rerank model |
@@ -247,7 +197,7 @@ Code-level config in `config.js`:
 - `RAG_TOKEN_BUDGET`
 - `RERANK_CANDIDATES`
 - `MODELS`
-- `TASKS`
+- `DEFAULT_MODEL`
 - embedding settings and paths
 
 ## Notes
@@ -256,7 +206,6 @@ Code-level config in `config.js`:
 - BM25 mode can work without Gemini embeddings, but answer generation still needs Gemini.
 - Wiki files are injected directly into prompts and are not returned by `/api/search`.
 - Jina rerank currently runs only in debug retrieval mode.
-- Compare mode shares one retrieved context across all selected models for a fairer side-by-side run.
 - Full-document mode falls back to slice-and-synthesize when selected content exceeds the token budget.
 - `data/index.json` is local metadata and may change during testing; document content and LanceDB storage stay local on each machine.
 - The repo currently has no automated test suite wired into `package.json`.

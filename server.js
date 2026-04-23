@@ -20,7 +20,6 @@ const {
   handleWikiList,
   handleSaveKey,
   handleSaveJinaKey,
-  handleModelCompare,
 } = require("./handlers/api");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -94,16 +93,8 @@ async function router(req, res) {
       return handleReindex(req, res);
     }
 
-    if (req.method === "POST" && url.pathname === "/api/compare") {
-      return handleModelCompare(req, res);
-    }
-
     if (req.method === "GET" && url.pathname === "/api/models") {
-      return sendJson(res, 200, { models: config.MODELS });
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/tasks") {
-      return sendJson(res, 200, { tasks: config.TASKS });
+      return sendJson(res, 200, { models: config.MODELS, defaultModel: config.DEFAULT_MODEL });
     }
 
     if (req.method === "GET") {

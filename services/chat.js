@@ -151,7 +151,7 @@ async function maybeRerankChunks({ question, chunks, rerank }) {
   };
 }
 
-async function answerWithFullDocument({ question, history, apiKey: requestApiKey, documentId, documentIds = [] }) {
+async function answerWithFullDocument({ question, history, apiKey: requestApiKey, model, documentId, documentIds = [] }) {
   const apiKey = requestApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("Missing Gemini API key. Add GEMINI_API_KEY to the environment or paste a key into the app.");
@@ -183,6 +183,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
   if (combinedMarkdownLength <= fullDocCharBudget) {
     answer = await generateGeminiAnswer({
       apiKey,
+      model,
       maxOutputTokens: 900,
       systemInstruction: buildFullDocumentSystemInstruction(),
       prompt: buildDirectFullDocumentPrompt({ question, history, documents: selectedDocuments }),
@@ -196,6 +197,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
     for (let i = 0; i < slices.length; i += 1) {
       const sliceSummary = await generateGeminiAnswer({
         apiKey,
+        model,
         maxOutputTokens: 500,
         systemInstruction: buildDocumentSliceSystemInstruction(),
         prompt: buildDocumentSlicePrompt({
@@ -211,6 +213,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
 
     answer = await generateGeminiAnswer({
       apiKey,
+      model,
       maxOutputTokens: 900,
       systemInstruction: buildFullDocumentSystemInstruction(),
       prompt: buildFullDocumentSynthesisPrompt({
@@ -241,7 +244,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
   };
 }
 
-async function callGemini({ question, history, apiKey: requestApiKey, tenantId = "default", retrievalMode = "hybrid" }) {
+async function callGemini({ question, history, apiKey: requestApiKey, model, tenantId = "default", retrievalMode = "hybrid" }) {
   const apiKey = requestApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("Missing Gemini API key. Add GEMINI_API_KEY to the environment or paste a key into the app.");
@@ -282,6 +285,7 @@ async function callGemini({ question, history, apiKey: requestApiKey, tenantId =
 
   const answer = await generateGeminiAnswer({
     apiKey,
+    model,
     maxOutputTokens: 700,
     systemInstruction: buildGeminiSystemInstruction(),
     prompt: buildGeminiUserPrompt({ question, contextText: fullContext, history }),

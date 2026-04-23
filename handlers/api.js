@@ -21,7 +21,6 @@ const {
   answerWithFullDocument,
   callGemini,
 } = require("../services/chat");
-const { runModelComparison } = require("../services/compare");
 
 async function handleUpload(req, res) {
   const contentType = String(req.headers["content-type"] || "");
@@ -212,6 +211,7 @@ async function handleChat(req, res) {
   const session = await ensureSession(req, res);
   const question = String(body.question || "").trim();
   const apiKey = String(body.apiKey || "").trim();
+  const model = String(body.model || "").trim();
   const chatMode = normalizeChatMode(String(body.chatMode || "qa").trim().toLowerCase());
   const documentId = String(body.documentId || "").trim();
   const documentIds = Array.isArray(body.documentIds) ? body.documentIds : [];
@@ -222,8 +222,8 @@ async function handleChat(req, res) {
   }
 
   const result = chatMode === "full-document"
-    ? await answerWithFullDocument({ question, history: session.history, apiKey, documentId, documentIds })
-    : await callGemini({ question, history: session.history, apiKey, tenantId: "default", retrievalMode });
+    ? await answerWithFullDocument({ question, history: session.history, apiKey, model, documentId, documentIds })
+    : await callGemini({ question, history: session.history, apiKey, model, tenantId: "default", retrievalMode });
 
   session.history.push(
     { role: "user", content: question },
@@ -399,30 +399,6 @@ async function handleSaveJinaKey(req, res) {
   return sendJson(res, 200, { saved: true });
 }
 
-async function handleModelCompare(req, res) {
-  const body = await parseJson(req);
-  const question = String(body.question || "").trim();
-  const apiKey = String(body.apiKey || "").trim() || process.env.GEMINI_API_KEY;
-  const models = Array.isArray(body.models) && body.models.length ? body.models : [config.MODELS[0]?.id];
-  const task = String(body.task || "qa").trim();
-  const retrievalMode = normalizeRetrievalMode(String(body.retrievalMode || "hybrid").trim().toLowerCase());
-
-  if (!question) {
-    return sendJson(res, 400, { error: "question is required." });
-  }
-
-  if (!apiKey) {
-    return sendJson(res, 400, { error: "API key is required." });
-  }
-
-  try {
-    const result = await runModelComparison({ question, apiKey, models, task, retrievalMode });
-    return sendJson(res, 200, result);
-  } catch (err) {
-    return sendJson(res, 500, { error: err.message || "Model comparison failed." });
-  }
-}
-
 module.exports = {
   handleUpload,
   handleDocuments,
@@ -435,5 +411,4 @@ module.exports = {
   handleWikiList,
   handleSaveKey,
   handleSaveJinaKey,
-  handleModelCompare,
 };
