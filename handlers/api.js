@@ -233,6 +233,7 @@ async function handleChat(req, res) {
 
   return sendJson(res, 200, {
     answer: result.answer,
+    structured: result.structured || null,
     chatMode: result.chatMode || chatMode,
     retrievalMode: result.retrievalMode,
     sessionId: session.id,

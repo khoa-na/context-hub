@@ -226,6 +226,38 @@ function renderChatMessage(role, content) {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
+function buildStructuredAnswerHtml(payload) {
+  const answer = extractRenderedAnswer(payload);
+  const citations = Array.isArray(payload?.structured?.citations) ? payload.structured.citations : [];
+  const followUpQuestions = Array.isArray(payload?.structured?.follow_up_questions) ? payload.structured.follow_up_questions : [];
+
+  let html = `<p>${escapeHtml(answer)}</p>`;
+
+  if (citations.length) {
+    html += `
+      <div class="structured-chat-section">
+        <div class="structured-chat-label">Citations</div>
+        <div class="structured-chat-tags">
+          ${citations.map((item) => `<span class="structured-chat-tag">${escapeHtml(item)}</span>`).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  if (followUpQuestions.length) {
+    html += `
+      <div class="structured-chat-section">
+        <div class="structured-chat-label">Follow-up Questions</div>
+        <ul class="structured-chat-list">
+          ${followUpQuestions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+      </div>
+    `;
+  }
+
+  return html;
+}
+
 function renderSources(chunks) {
   if (!chunks || !chunks.length) {
     sourceList.textContent = "No retrieval yet.";
@@ -296,6 +328,14 @@ function buildSearchDebugSummary(payload) {
   }
 
   return lines.join("\n");
+}
+
+function extractRenderedAnswer(payload) {
+  if (typeof payload?.structured?.answer === "string" && payload.structured.answer.trim()) {
+    return payload.structured.answer.trim();
+  }
+
+  return typeof payload?.answer === "string" ? payload.answer : "";
 }
 
 async function resetSessionOnServer() {
@@ -594,7 +634,7 @@ chatForm.addEventListener("submit", async (event) => {
 
     const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
 
-    renderChatMessage("assistant", isDebugSearch ? "Searching..." : chatMode === "full-document" ? "Reading the full document..." : "Thinking...");
+    renderChatMessage("assistant", isDebugSearch ? "Searching..." : chatMode === "full-document" ? "Reading the full document..." : "Generating answer...");
 
     const response = await fetch(requestPath, {
       method: "POST",
@@ -618,14 +658,24 @@ chatForm.addEventListener("submit", async (event) => {
       throw new Error(payload.error || "Chat failed.");
     }
 
-    const lastMsg = chatLog.querySelector(".msg:last-child .msg-body p");
-    if (lastMsg) {
-      lastMsg.textContent = isDebugSearch ? buildSearchDebugSummary(payload) : payload.answer;
+    const renderedAnswer = extractRenderedAnswer(payload);
+    const lastMsgBody = chatLog.querySelector(".msg:last-child .msg-body");
+    const lastMsg = lastMsgBody?.querySelector("p");
+    if (lastMsgBody) {
+      if (isDebugSearch) {
+        lastMsgBody.innerHTML = `<p>${escapeHtml(buildSearchDebugSummary(payload))}</p>`;
+      } else if (payload.structured) {
+        lastMsgBody.innerHTML = buildStructuredAnswerHtml(payload);
+      } else if (lastMsg) {
+        lastMsg.textContent = renderedAnswer;
+      } else {
+        lastMsgBody.innerHTML = `<p>${escapeHtml(renderedAnswer)}</p>`;
+      }
     }
 
     if (!isDebugSearch) {
       state.history.push({ role: "user", content: question });
-      state.history.push({ role: "assistant", content: payload.answer });
+      state.history.push({ role: "assistant", content: renderedAnswer });
     }
 
     renderSources(payload.chunks);

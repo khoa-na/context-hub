@@ -373,6 +373,49 @@ button, textarea, input { font: inherit; color: inherit; }
 
 .msg-body p { white-space: pre-wrap; word-break: break-word; }
 
+.structured-chat-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.structured-chat-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.structured-chat-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.structured-chat-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.structured-chat-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.structured-chat-list li {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
 .chat-input-bar {
   display: flex;
   gap: 10px;

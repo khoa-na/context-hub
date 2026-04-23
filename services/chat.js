@@ -13,6 +13,7 @@ const {
   buildDocumentSlicePrompt,
   buildFullDocumentSynthesisPrompt,
   generateGeminiAnswer,
+  generateStructuredGeminiAnswer,
 } = require("./gemini");
 
 function normalizeRetrievalMode(value) {
@@ -178,16 +179,19 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
   const fullDocCharBudget = config.RAG_TOKEN_BUDGET * 4;
   const combinedMarkdownLength = selectedDocuments.reduce((sum, doc) => sum + doc.markdown.length, 0);
   let answer;
+  let structured = null;
   let sliceCount = 1;
 
   if (combinedMarkdownLength <= fullDocCharBudget) {
-    answer = await generateGeminiAnswer({
+    const response = await generateStructuredGeminiAnswer({
       apiKey,
       model,
       maxOutputTokens: 900,
       systemInstruction: buildFullDocumentSystemInstruction(),
       prompt: buildDirectFullDocumentPrompt({ question, history, documents: selectedDocuments }),
     });
+    answer = response.answer;
+    structured = response.structured;
   } else {
     const blocks = buildDocumentSliceBlocks(selectedDocuments);
     const slices = packDocumentBlocksIntoSlices(blocks);
@@ -211,7 +215,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
       sliceSummaries.push(sliceSummary);
     }
 
-    answer = await generateGeminiAnswer({
+    const response = await generateStructuredGeminiAnswer({
       apiKey,
       model,
       maxOutputTokens: 900,
@@ -223,10 +227,13 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
         sliceSummaries,
       }),
     });
+    answer = response.answer;
+    structured = response.structured;
   }
 
   return {
     answer,
+    structured,
     chunks: selectedDocuments.map(buildFullDocumentSource),
     retrievalMode: "full-document",
     chatMode: "full-document",
@@ -283,7 +290,7 @@ async function callGemini({ question, history, apiKey: requestApiKey, model, ten
     throw new Error("No documents are available yet. Please upload a file or add .md files to wiki/default/");
   }
 
-  const answer = await generateGeminiAnswer({
+  const response = await generateStructuredGeminiAnswer({
     apiKey,
     model,
     maxOutputTokens: 700,
@@ -292,7 +299,8 @@ async function callGemini({ question, history, apiKey: requestApiKey, model, ten
   });
 
   return {
-    answer,
+    answer: response.answer,
+    structured: response.structured,
     chunks: ragChunks,
     retrievalMode: selectedRetrievalMode,
   };
