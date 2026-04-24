@@ -1,6 +1,5 @@
 const config = require("../config");
 const { semanticSearch, bm25Search, hybridSearch } = require("../db");
-const { rerankWithJina } = require("../rerank");
 const { loadWikiContext, loadAllDocumentsWithMarkdown } = require("../lib/storage");
 const { truncateToTokenBudget } = require("../lib/text");
 const { getDocumentSections } = require("../lib/chunking");
@@ -121,34 +120,6 @@ function serializeChunk(chunk) {
     childContent: chunk.childContent || "",
     score: chunk.score,
     retrieval: chunk.retrieval || null,
-  };
-}
-
-async function maybeRerankChunks({ question, chunks, rerank }) {
-  if (!rerank || !chunks.length) {
-    return {
-      chunks,
-      rerankApplied: false,
-      rerankProvider: null,
-    };
-  }
-
-  const provider = String(rerank.provider || "").trim().toLowerCase();
-  if (provider !== "jina") {
-    throw new Error(`Unsupported rerank provider: ${provider}`);
-  }
-
-  const reranked = await rerankWithJina({
-    query: question,
-    chunks,
-    apiKey: rerank.apiKey,
-    topK: rerank.topK,
-  });
-
-  return {
-    chunks: reranked,
-    rerankApplied: true,
-    rerankProvider: provider,
   };
 }
 
@@ -317,7 +288,6 @@ module.exports = {
   normalizeChatMode,
   retrieveRelevantChunks,
   serializeChunk,
-  maybeRerankChunks,
   answerWithFullDocument,
   callGemini,
 };

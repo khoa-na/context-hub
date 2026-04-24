@@ -13,18 +13,14 @@ const uploadStatus = document.querySelector("#upload-status");
 const documentList = document.querySelector("#document-list");
 const apiKeyInput = document.querySelector("#api-key-input");
 const saveKeyButton = document.querySelector("#save-key-button");
-const jinaApiKeyInput = document.querySelector("#jina-api-key-input");
-const saveJinaKeyButton = document.querySelector("#save-jina-key-button");
 const showKeyToggle = document.querySelector("#show-key-toggle");
 const keyStatus = document.querySelector("#key-status");
-const jinaKeyStatus = document.querySelector("#jina-key-status");
 const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
 const chatModeSelect = document.querySelector("#chat-mode");
 const modelSelect = document.querySelector("#model-select");
 const retrievalModeSelect = document.querySelector("#retrieval-mode");
 const debugSearchToggle = document.querySelector("#debug-search-toggle");
-const rerankToggle = document.querySelector("#rerank-toggle");
 const documentFocusRow = document.querySelector("#document-focus-row");
 const docPickerList = document.querySelector("#doc-picker-list");
 const docSelectAllBtn = document.querySelector("#doc-select-all-btn");
@@ -43,7 +39,6 @@ const wikiUploadStatus = document.querySelector("#wiki-upload-status");
 const wikiList = document.querySelector("#wiki-list");
 
 let sessionApiKey = "";
-let sessionJinaApiKey = "";
 
 const dropzone = fileInput.closest(".dropzone");
 const wikiDropzone = wikiFileInput.closest(".dropzone");
@@ -83,13 +78,23 @@ sourcesToggle.addEventListener("click", () => {
 });
 
 function updateSelectedFileUI() {
-  const file = fileInput.files[0];
-  if (!file) {
-    selectedFileName.textContent = "Drop a file or click to browse";
+  const files = Array.from(fileInput.files || []);
+  if (!files.length) {
+    selectedFileName.textContent = "Drop one or more files or click to browse";
     uploadButton.disabled = true;
     return;
   }
-  selectedFileName.textContent = `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB`;
+
+  if (files.length === 1) {
+    const file = files[0];
+    selectedFileName.textContent = `${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB`;
+  } else {
+    const totalSizeKb = Math.max(1, Math.round(files.reduce((sum, file) => sum + file.size, 0) / 1024));
+    const previewNames = files.slice(0, 3).map((file) => file.name).join(", ");
+    const suffix = files.length > 3 ? ` +${files.length - 3} more` : "";
+    selectedFileName.textContent = `${files.length} files · ${totalSizeKb} KB · ${previewNames}${suffix}`;
+  }
+
   uploadButton.disabled = false;
 }
 
@@ -204,11 +209,9 @@ function updateChatModeUI() {
   documentFocusRow.hidden = !isFullDocumentMode;
   retrievalModeSelect.disabled = false;
   debugSearchToggle.disabled = false;
-  rerankToggle.disabled = false;
 
   if (isFullDocumentMode) {
     debugSearchToggle.checked = false;
-    rerankToggle.checked = false;
     chatInput.placeholder = "Ask for a summary, comparison, or analysis of the selected documents...";
   } else {
     chatInput.placeholder = "Ask anything about your documents...";
@@ -287,12 +290,6 @@ function renderSources(chunks) {
         if (retrieval.bm25Rank) {
           retrievalMeta.push(`bm25 #${retrieval.bm25Rank}`);
         }
-        if (retrieval.rerankRank) {
-          retrievalMeta.push(`rerank #${retrieval.rerankRank}`);
-        }
-        if (typeof retrieval.rerankScore === "number") {
-          retrievalMeta.push(`rerank score ${retrieval.rerankScore.toFixed(3)}`);
-        }
         const matchedPassage = (chunk.childContent || "").trim();
         const fullContext = (chunk.content || "").trim();
 
@@ -323,11 +320,6 @@ function buildSearchDebugSummary(payload) {
     `Matched chunks: ${payload.chunkCount || 0}`,
     payload.usesEmbedding ? "Embedding: Gemini embedding was used." : "Embedding: not used (BM25 only).",
   ];
-
-  if (payload.rerankApplied) {
-    lines.push(`Rerank: ${payload.rerankProvider || "jina"} was applied on ${payload.initialChunkCount || payload.chunkCount || 0} candidates.`);
-  }
-
   if (payload.wikiInjectedSeparately) {
     lines.push("Wiki files are not shown here because they are injected separately at answer time.");
   }
@@ -400,40 +392,10 @@ async function saveApiKey() {
   return sessionApiKey;
 }
 
-async function saveJinaApiKey() {
-  const value = jinaApiKeyInput.value.trim();
-  if (!value) {
-    sessionJinaApiKey = "";
-    jinaKeyStatus.textContent = "Key cleared.";
-    return "";
-  }
-
-  try {
-    const response = await fetch("/api/save-jina-key", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey: value }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "Failed to save key.");
-    }
-    sessionJinaApiKey = value;
-    jinaKeyStatus.textContent = "Jina key saved to .env. It will persist across restarts.";
-  } catch (err) {
-    sessionJinaApiKey = value;
-    jinaKeyStatus.textContent = "Saved for this session only. Server error: " + err.message;
-  }
-  return sessionJinaApiKey;
-}
-
 function hydrateApiKey() {
   sessionApiKey = "";
-  sessionJinaApiKey = "";
   apiKeyInput.value = "";
-  jinaApiKeyInput.value = "";
   keyStatus.textContent = "No session key. Enter your Gemini API key above.";
-  jinaKeyStatus.textContent = "No session key. Enter your Jina API key above for rerank.";
 }
 
 async function loadDocuments() {
@@ -445,40 +407,79 @@ async function loadDocuments() {
   updateChatModeUI();
 }
 
+async function uploadSingleDocument(file, apiKey) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch("/api/upload", {
+    method: "POST",
+    headers: apiKey ? { "x-api-key": apiKey } : undefined,
+    body: formData,
+  });
+
+  const raw = await response.text();
+  const payload = raw ? JSON.parse(raw) : {};
+  if (!response.ok) {
+    throw new Error(payload.error || "Upload failed.");
+  }
+
+  return payload;
+}
+
 uploadButton.addEventListener("click", async () => {
-  const file = fileInput.files[0];
-  if (!file) {
-    uploadStatus.textContent = "Choose a file first.";
+  const files = Array.from(fileInput.files || []);
+  if (!files.length) {
+    uploadStatus.textContent = "Choose one or more files first.";
     return;
   }
 
   uploadButton.disabled = true;
-  uploadStatus.textContent = "Converting and indexing...";
+  uploadStatus.textContent = files.length === 1 ? "Converting and indexing..." : `Uploading and indexing ${files.length} files...`;
 
   try {
-    const formData = new FormData();
-    formData.append("file", file);
     const apiKey = apiKeyInput.value.trim() || sessionApiKey;
+    const results = [];
 
-    const response = await fetch("/api/upload", {
-      method: "POST",
-      headers: apiKey ? { "x-api-key": apiKey } : undefined,
-      body: formData,
-    });
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      uploadStatus.textContent = files.length === 1
+        ? `Converting and indexing ${file.name}...`
+        : `Uploading ${index + 1}/${files.length}: ${file.name}`;
 
-    const raw = await response.text();
-    const payload = raw ? JSON.parse(raw) : {};
-    if (!response.ok) {
-      throw new Error(payload.error || "Upload failed.");
+      try {
+        const payload = await uploadSingleDocument(file, apiKey);
+        results.push({
+          filename: payload.document?.filename || file.name,
+          indexingStatus: payload.indexingStatus || "unknown",
+          ok: true,
+        });
+      } catch (error) {
+        results.push({
+          filename: file.name,
+          ok: false,
+          error: error.message,
+        });
+      }
     }
 
-    if (payload.indexingStatus === "indexed") {
-      uploadStatus.textContent = `Indexed ${payload.document.filename} (${payload.document.chunkCount} chunks)`;
-    } else if (payload.indexingStatus === "failed") {
-      uploadStatus.textContent = `Uploaded ${payload.document.filename}, but indexing failed.`;
-    } else {
-      uploadStatus.textContent = `Uploaded ${payload.document.filename}, but it was not indexed yet.`;
+    const indexedCount = results.filter((item) => item.ok && item.indexingStatus === "indexed").length;
+    const uploadedOnlyCount = results.filter((item) => item.ok && item.indexingStatus !== "indexed").length;
+    const failedCount = results.filter((item) => !item.ok).length;
+
+    const statusParts = [];
+    if (indexedCount) {
+      statusParts.push(`${indexedCount} indexed`);
     }
+    if (uploadedOnlyCount) {
+      statusParts.push(`${uploadedOnlyCount} uploaded with indexing pending/failed`);
+    }
+    if (failedCount) {
+      statusParts.push(`${failedCount} failed`);
+    }
+
+    uploadStatus.textContent = statusParts.length
+      ? `Batch complete: ${statusParts.join(" · ")}`
+      : "No files were processed.";
 
     await loadDocuments();
     resetConversation(true);
@@ -500,13 +501,8 @@ saveKeyButton.addEventListener("click", () => {
   saveApiKey();
 });
 
-saveJinaKeyButton.addEventListener("click", () => {
-  saveJinaApiKey();
-});
-
 showKeyToggle.addEventListener("change", () => {
   apiKeyInput.type = showKeyToggle.checked ? "text" : "password";
-  jinaApiKeyInput.type = showKeyToggle.checked ? "text" : "password";
 });
 
 modelSelect.addEventListener("change", () => {
@@ -635,7 +631,6 @@ chatForm.addEventListener("submit", async (event) => {
 
   try {
     const apiKey = apiKeyInput.value.trim() || sessionApiKey;
-    const rerankApiKey = jinaApiKeyInput.value.trim() || sessionJinaApiKey;
 
     const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
 
@@ -653,8 +648,6 @@ chatForm.addEventListener("submit", async (event) => {
         documentId: chatMode === "full-document" ? (selectedDocumentIds[0] || "") : "",
         documentIds: selectedDocumentIds,
         retrievalMode: retrievalModeSelect.value,
-        rerank: isDebugSearch && rerankToggle.checked,
-        rerankApiKey,
       }),
     });
 

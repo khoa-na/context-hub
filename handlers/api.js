@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const config = require("../config");
 const { ROOT, DOCS_DIR } = require("../constants");
 const { getDocChunkCounts, removeDocumentChunks, createIndexes } = require("../db");
-const { sendJson, parseJson, parseBoolean } = require("../lib/http");
+const { sendJson, parseJson } = require("../lib/http");
 const { ensureSession, rotateSession, writeSession } = require("../lib/session");
 const { parseMultipartFile } = require("../lib/uploads");
 const { convertToMarkdown, convertUploadToMarkdown, slugify, repairTextEncoding } = require("../lib/markdown");
@@ -17,7 +17,6 @@ const {
   retrievalUsesEmbedding,
   retrieveRelevantChunks,
   serializeChunk,
-  maybeRerankChunks,
   answerWithFullDocument,
   callGemini,
 } = require("../services/chat");
@@ -251,10 +250,6 @@ async function handleSearch(req, res) {
   const apiKey = String(body.apiKey || "").trim() || process.env.GEMINI_API_KEY || "";
   const retrievalMode = normalizeRetrievalMode(String(body.retrievalMode || "hybrid").trim().toLowerCase());
   const topK = Math.min(Math.max(Number(body.topK) || 5, 1), 20);
-  const useRerank = parseBoolean(body.rerank);
-  const rerankProvider = String(body.rerankProvider || process.env.RERANK_PROVIDER || "jina").trim().toLowerCase();
-  const rerankApiKey = String(body.rerankApiKey || "").trim() || process.env.JINA_API_KEY || "";
-  const retrievalTopK = useRerank ? Math.max(topK, config.RERANK_CANDIDATES || topK) : topK;
 
   if (!question) {
     return sendJson(res, 400, { error: "question is required." });
@@ -264,38 +259,20 @@ async function handleSearch(req, res) {
     return sendJson(res, 400, { error: "API key required for semantic or hybrid debug search." });
   }
 
-  if (useRerank && !rerankApiKey) {
-    return sendJson(res, 400, { error: "JINA_API_KEY is required for rerank debug mode." });
-  }
-
   const initialChunks = await retrieveRelevantChunks({
     question,
     tenantId: "default",
     apiKey,
     retrievalMode,
-    topK: retrievalTopK,
+    topK,
   });
 
-  const rerankResult = await maybeRerankChunks({
-    question,
-    chunks: initialChunks,
-    rerank: useRerank
-      ? {
-          provider: rerankProvider,
-          apiKey: rerankApiKey,
-          topK,
-        }
-      : null,
-  });
-
-  const chunks = useRerank ? rerankResult.chunks : initialChunks;
+  const chunks = initialChunks;
 
   return sendJson(res, 200, {
     query: question,
     retrievalMode,
     usesEmbedding: retrievalUsesEmbedding(retrievalMode),
-    rerankApplied: rerankResult.rerankApplied,
-    rerankProvider: rerankResult.rerankProvider,
     topK,
     chunkCount: chunks.length,
     initialChunkCount: initialChunks.length,
@@ -391,16 +368,6 @@ async function handleSaveKey(req, res) {
   return sendJson(res, 200, { saved: true });
 }
 
-async function handleSaveJinaKey(req, res) {
-  const body = await parseJson(req);
-  const key = String(body.apiKey || "").trim();
-  if (!key) {
-    return sendJson(res, 400, { error: "apiKey is required." });
-  }
-  await saveEnvValue("JINA_API_KEY", key);
-  return sendJson(res, 200, { saved: true });
-}
-
 module.exports = {
   handleUpload,
   handleDocuments,
@@ -412,5 +379,4 @@ module.exports = {
   handleWikiUpload,
   handleWikiList,
   handleSaveKey,
-  handleSaveJinaKey,
 };

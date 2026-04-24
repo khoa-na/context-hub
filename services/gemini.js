@@ -1,6 +1,33 @@
 const config = require("../config");
 const { callPythonGenAI } = require("../lib/python-genai-bridge");
 
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getErrorStatusCode(err) {
+  const directStatus = Number(err?.statusCode);
+  if (Number.isFinite(directStatus) && directStatus > 0) {
+    return directStatus;
+  }
+
+  const causeStatus = Number(err?.cause?.statusCode);
+  if (Number.isFinite(causeStatus) && causeStatus > 0) {
+    return causeStatus;
+  }
+
+  const message = String(err?.message || err?.cause?.message || "");
+  const match = message.match(/\b(\d{3})\b/);
+  return match ? Number(match[1]) : null;
+}
+
+function isRetryableModelError(err) {
+  const statusCode = getErrorStatusCode(err);
+  return statusCode ? RETRYABLE_STATUS_CODES.has(statusCode) : false;
+}
+
 function shouldSkipSchemaStructuredAttempt(model) {
   return model === "gemma-4-26b-a4b-it";
 }
@@ -403,21 +430,35 @@ async function postGeminiGenerateContent({
   responseMimeType,
   responseJsonSchema,
 }) {
-  try {
-    return await callPythonGenAI({
-      apiKey,
-      model,
-      prompt,
-      maxOutputTokens,
-      systemInstruction: systemInstruction || buildGeminiSystemInstruction(),
-      responseMimeType,
-      responseJsonSchema,
-    });
-  } catch (err) {
-    const error = new Error(`Python Gemini SDK error: ${err.message}`);
-    error.statusCode = 500;
-    error.cause = err;
-    throw error;
+  const attempts = 3;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await callPythonGenAI({
+        apiKey,
+        model,
+        prompt,
+        maxOutputTokens,
+        systemInstruction: systemInstruction || buildGeminiSystemInstruction(),
+        responseMimeType,
+        responseJsonSchema,
+      });
+    } catch (err) {
+      const statusCode = getErrorStatusCode(err) || 500;
+      const isLastAttempt = attempt === attempts - 1;
+
+      if (!isLastAttempt && isRetryableModelError(err)) {
+        const backoffMs = 1200 * (attempt + 1);
+        console.warn(`[genai] ${model} request failed with ${statusCode}. Retrying in ${backoffMs}ms... (${attempt + 1}/${attempts - 1})`);
+        await sleep(backoffMs);
+        continue;
+      }
+
+      const error = new Error(`Python Gemini SDK error: ${err.message}`);
+      error.statusCode = statusCode;
+      error.cause = err;
+      throw error;
+    }
   }
 }
 
@@ -522,63 +563,102 @@ async function generateStructuredGeminiAnswer({ apiKey, model: requestedModel, p
   }
 }
 
+function buildChunkTitlePrompt(batch) {
+  const previewLines = batch
+    .map((chunk, idx) => `[${idx}] Current title: "${chunk.title}"\nContent preview:\n${chunk.text.slice(0, 320)}`)
+    .join("\n\n");
+
+  return [
+    "Generate concise Vietnamese titles for these document chunks.",
+    "Keep an existing title if it is already specific.",
+    "Replace generic titles with something more specific.",
+    "Return only a JSON array.",
+    'Each item must have: {"index": number, "title": string}.',
+    "",
+    "Chunks:",
+    previewLines,
+  ].join("\n");
+}
+
+function parseChunkTitleResponse(answer) {
+  const raw = String(answer || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function requestChunkTitles({ apiKey, model, batch }) {
+  const payload = await postGeminiGenerateContent({
+    apiKey,
+    model,
+    prompt: buildChunkTitlePrompt(batch),
+    maxOutputTokens: 512,
+    systemInstruction: "Return concise Vietnamese chunk titles. Return JSON only.",
+  });
+
+  const rawText = extractGeminiText(payload);
+  return parseChunkTitleResponse(rawText);
+}
+
+async function applyChunkTitlesForBatch({ chunks, startIndex, apiKey, model }) {
+  if (!chunks.length) {
+    return;
+  }
+
+  try {
+    const titles = await requestChunkTitles({ apiKey, model, batch: chunks });
+    if (!titles) {
+      throw new Error("Model returned invalid chunk title JSON.");
+    }
+
+    for (const item of titles) {
+      const idx = typeof item.index === "number" ? item.index : null;
+      const newTitle = typeof item.title === "string" ? item.title.trim() : null;
+      if (idx !== null && newTitle && idx >= 0 && idx < chunks.length) {
+        chunks[idx].title = newTitle;
+      }
+    }
+    return;
+  } catch (err) {
+    if (chunks.length === 1) {
+      return;
+    }
+  }
+
+  const midpoint = Math.ceil(chunks.length / 2);
+  await applyChunkTitlesForBatch({
+    chunks: chunks.slice(0, midpoint),
+    startIndex,
+    apiKey,
+    model,
+  });
+  await applyChunkTitlesForBatch({
+    chunks: chunks.slice(midpoint),
+    startIndex: startIndex + midpoint,
+    apiKey,
+    model,
+  });
+}
+
 async function generateChunkTitles(chunks, apiKey) {
   if (!apiKey || !chunks.length) {
     return chunks;
   }
 
-  const batchSize = 10;
+  const batchSize = 6;
   const model = process.env.GEMINI_MODEL || config.DEFAULT_MODEL || "gemma-4-31b-it";
 
   for (let i = 0; i < chunks.length; i += batchSize) {
     const batch = chunks.slice(i, i + batchSize);
-    const previewLines = batch.map((chunk, idx) => `[${idx}] Title: "${chunk.title}"\nContent:\n${chunk.text.slice(0, 400)}`).join("\n\n");
-
-    const prompt = [
-      "Below are text chunks from a document. Each has a current title (extracted from headings, may be generic like 'Overview').",
-      "Generate a concise Vietnamese title (5-10 words) for EACH chunk that captures its SPECIFIC topic.",
-      "If the existing title is already specific and accurate, keep it.",
-      "If the existing title is generic (e.g. 'Overview') or missing context, replace it.",
-      "Return a JSON array of objects with fields: index (number, relative to this batch starting at 0) and title (string).",
-      "Return ONLY the JSON array, no other text.",
-      "",
-      "Chunks:",
-      previewLines,
-    ].join("\n");
-
-    try {
-      const payload = await postGeminiGenerateContent({
-        apiKey,
-        model,
-        prompt,
-        maxOutputTokens: 1024,
-      });
-
-      const rawText = extractGeminiText(payload);
-      const answer = rawText;
-
-      let titles;
-      try {
-        const jsonMatch = answer.match(/\[[\s\S]*\]/);
-        titles = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(answer);
-      } catch {
-        continue;
-      }
-
-      if (!Array.isArray(titles)) {
-        continue;
-      }
-
-      for (const item of titles) {
-        const idx = typeof item.index === "number" ? item.index : null;
-        const newTitle = typeof item.title === "string" ? item.title.trim() : null;
-        if (idx !== null && newTitle && i + idx < chunks.length) {
-          chunks[i + idx].title = newTitle;
-        }
-      }
-    } catch (err) {
-      console.error("Chunk title generation failed:", err.message);
-    }
+    await applyChunkTitlesForBatch({ chunks: batch, startIndex: i, apiKey, model });
   }
 
   return chunks;
