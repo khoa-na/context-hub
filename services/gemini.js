@@ -339,9 +339,11 @@ function buildFullDocumentSystemInstruction() {
 
 function buildDocumentSliceSystemInstruction() {
   return [
-    "Summarize only the supplied slice.",
+    "Extract only information from the supplied slice that may help answer the user's request.",
     "Use only information in the slice.",
-    "Be concise.",
+    "Prefer concise bullets with exact numbers, units, percentages, periods, KPI names, risks, anomalies, and trend signals.",
+    "Preserve source labels such as document id, filename, section, and slice index when present.",
+    "If the slice has no relevant information, say: No directly relevant information in this slice.",
     "Use the same language as the user.",
   ].join("\n");
 }
@@ -399,23 +401,80 @@ function buildDocumentSlicePrompt({ question, documents, sliceText, sliceIndex, 
     buildDocumentListHeader(documents),
     `Slice ${sliceIndex} of ${totalSlices}`,
     `User request: ${question}`,
-    "Summarize this slice for later whole-document synthesis.",
+    "Extract facts from this slice for later whole-document synthesis and cross-document comparison.",
+    "Focus on metrics, financial values, ratios, time periods, changes versus prior periods, risks, drivers, and notable exceptions.",
+    "Keep the output compact. Do not invent missing values.",
     `=== DOCUMENT SLICE ===\n${sliceText}`,
   ].join("\n\n");
 }
 
-function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceSummaries }) {
+function buildDocumentSummaryPrompt({ question, document, sliceSummaries }) {
+  return [
+    "Build a compact document-level summary from the slice extractions.",
+    `User request: ${question}`,
+    "Preserve exact numbers, units, periods, KPI names, risks, anomalies, and trend signals.",
+    "Keep citations/source labels from the slice extractions.",
+    "If a metric is missing or uncertain, say so briefly.",
+    "",
+    `=== DOCUMENT ===\n${buildDocumentListHeader([document])}`,
+    "=== SLICE EXTRACTIONS ===",
+    sliceSummaries.map((summary, index) => `Slice ${index + 1}:\n${summary}`).join("\n\n"),
+  ].join("\n");
+}
+
+function buildWholeDocumentSummaryPrompt({ question, document }) {
+  return [
+    "Build a compact document-level summary from the full document markdown.",
+    `User request: ${question}`,
+    "Preserve exact numbers, units, periods, KPI names, risks, anomalies, and trend signals.",
+    "Keep source labels using the document id, title, and filename.",
+    "If a metric is missing or uncertain, say so briefly.",
+    "Do not invent missing values.",
+    "",
+    `=== DOCUMENT ===\n${buildDocumentListHeader([document])}`,
+    `=== FULL DOCUMENT MARKDOWN ===\n${document.markdown}`,
+  ].join("\n");
+}
+
+function buildDocumentReduceSystemInstruction() {
+  return [
+    "Create compact intermediate summaries for later synthesis.",
+    "Use only the supplied extracted facts or summaries.",
+    "Preserve exact numbers, units, periods, document ids, source labels, risks, anomalies, and trend signals.",
+    "Do not invent missing values.",
+    "Use the same language as the user.",
+  ].join("\n");
+}
+
+function buildCompressedSummariesPrompt({ question, documents, summaries, batchIndex, totalBatches }) {
+  return [
+    "Compress these document summaries for final synthesis.",
+    `User request: ${question}`,
+    `Batch ${batchIndex} of ${totalBatches}`,
+    "Keep only information needed for answering the request and comparing selected documents.",
+    "Preserve exact numbers, units, document ids, periods, and source labels.",
+    "Do not invent missing values.",
+    "",
+    `=== SELECTED DOCUMENTS ===\n${buildDocumentListHeader(documents)}`,
+    "=== SUMMARIES TO COMPRESS ===",
+    summaries.map((summary, index) => `Summary ${index + 1}:\n${summary}`).join("\n\n"),
+  ].join("\n");
+}
+
+function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceSummaries, documentSummaries }) {
   const historyLines = (history || [])
     .slice(-4)
     .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
     .join("\n");
+  const summaries = documentSummaries || sliceSummaries || [];
 
   return [
     historyLines ? `Conversation so far:\n${historyLines}` : "",
     `=== SELECTED DOCUMENTS ===\n${buildDocumentListHeader(documents)}`,
-    "=== WHOLE-DOCUMENT SLICE SUMMARIES ===",
-    sliceSummaries.map((summary, index) => `Slice ${index + 1}:\n${summary}`).join("\n\n"),
+    "=== DOCUMENT-LEVEL SUMMARIES ===",
+    summaries.map((summary, index) => `Document summary ${index + 1}:\n${summary}`).join("\n\n"),
     `=== USER REQUEST ===\n${question}`,
+    "Answer from the summaries only. Compare documents explicitly when the request asks for comparison.",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -668,9 +727,13 @@ module.exports = {
   buildGeminiSystemInstruction,
   buildFullDocumentSystemInstruction,
   buildDocumentSliceSystemInstruction,
+  buildDocumentReduceSystemInstruction,
   buildGeminiUserPrompt,
   buildDirectFullDocumentPrompt,
   buildDocumentSlicePrompt,
+  buildDocumentSummaryPrompt,
+  buildWholeDocumentSummaryPrompt,
+  buildCompressedSummariesPrompt,
   buildFullDocumentSynthesisPrompt,
   generateGeminiAnswer,
   generateStructuredGeminiAnswer,

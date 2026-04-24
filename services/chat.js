@@ -2,14 +2,18 @@ const config = require("../config");
 const { semanticSearch, bm25Search, hybridSearch } = require("../db");
 const { loadWikiContext, loadAllDocumentsWithMarkdown } = require("../lib/storage");
 const { truncateToTokenBudget } = require("../lib/text");
-const { getDocumentSections } = require("../lib/chunking");
+const { getDocumentSections, splitContentIntoSlices } = require("../lib/chunking");
 const {
   buildGeminiSystemInstruction,
   buildFullDocumentSystemInstruction,
   buildDocumentSliceSystemInstruction,
+  buildDocumentReduceSystemInstruction,
   buildGeminiUserPrompt,
   buildDirectFullDocumentPrompt,
   buildDocumentSlicePrompt,
+  buildDocumentSummaryPrompt,
+  buildWholeDocumentSummaryPrompt,
+  buildCompressedSummariesPrompt,
   buildFullDocumentSynthesisPrompt,
   generateGeminiAnswer,
   generateStructuredGeminiAnswer,
@@ -54,49 +58,152 @@ function normalizeDocumentSelection(documentIds = [], documentId = "") {
   return [...new Set(normalized)];
 }
 
-function buildDocumentSliceBlocks(documents) {
-  const blocks = [];
+function buildSliceHeader({ document, section, localSliceIndex }) {
+  return [
+    `Document ID: ${document.id}`,
+    `Filename: ${document.filename}`,
+    `Title: ${document.title}`,
+    `Section ID: ${section.id}`,
+    `Section title: ${section.title}`,
+    `Document slice: ${localSliceIndex}`,
+  ].join("\n");
+}
+
+function buildDocumentSlices(documents, maxChars = config.FULL_DOCUMENT_SLICE_CHAR_BUDGET || 7500) {
+  const slices = [];
 
   for (const document of documents) {
     const sections = getDocumentSections(document.markdown);
-    if (!sections.length) {
-      blocks.push(`## ${document.title} (${document.filename})\n${document.markdown}`);
-      continue;
-    }
+    const documentSections = sections.length
+      ? sections
+      : [{ id: "S1", title: document.title || "Document", text: document.markdown }];
+    let localSliceIndex = 1;
 
-    for (const section of sections) {
-      blocks.push(
-        [
-          `## ${document.title} (${document.filename})`,
-          `Document ID: ${document.id}`,
-          section.text,
-        ].join("\n")
-      );
+    for (const section of documentSections) {
+      const provisionalHeader = buildSliceHeader({ document, section, localSliceIndex });
+      const contentBudget = Math.max(1000, maxChars - provisionalHeader.length - 64);
+      const contentSlices = splitContentIntoSlices(section.text, contentBudget);
+
+      for (const contentSlice of contentSlices) {
+        const header = buildSliceHeader({ document, section, localSliceIndex });
+        slices.push({
+          document,
+          section,
+          text: `${header}\n\n${contentSlice}`,
+        });
+        localSliceIndex += 1;
+      }
     }
   }
 
-  return blocks;
+  return slices;
 }
 
-function packDocumentBlocksIntoSlices(blocks, maxChars = 12000) {
-  const slices = [];
+function packSummariesIntoBatches(summaries, maxChars) {
+  const batches = [];
   let current = "";
 
-  for (const block of blocks) {
-    const candidate = current ? `${current}\n\n${block}` : block;
+  for (const summary of summaries) {
+    const candidate = current ? `${current}\n\n${summary}` : summary;
     if (candidate.length > maxChars && current) {
-      slices.push(current);
-      current = block;
+      batches.push(current);
+      current = summary;
     } else {
       current = candidate;
     }
   }
 
   if (current) {
-    slices.push(current);
+    batches.push(current);
   }
 
-  return slices;
+  return batches;
+}
+
+function totalSummaryLength(summaries) {
+  return summaries.reduce((sum, summary) => sum + String(summary || "").length, 0);
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const limit = Math.max(1, Number(concurrency) || 1);
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  const workerCount = Math.min(limit, items.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
+async function summarizeLongDocumentWithSlices({ document, question, apiKey, model, modelConcurrency }) {
+  const slices = buildDocumentSlices([document]);
+  const sliceSummaries = await mapWithConcurrency(slices, modelConcurrency, async (slice, index) => {
+    return generateGeminiAnswer({
+      apiKey,
+      model,
+      maxOutputTokens: 500,
+      systemInstruction: buildDocumentSliceSystemInstruction(),
+      prompt: buildDocumentSlicePrompt({
+        question,
+        documents: [document],
+        sliceText: slice.text,
+        sliceIndex: index + 1,
+        totalSlices: slices.length,
+      }),
+    });
+  });
+
+  const summary = await generateGeminiAnswer({
+    apiKey,
+    model,
+    maxOutputTokens: 700,
+    systemInstruction: buildDocumentReduceSystemInstruction(),
+    prompt: buildDocumentSummaryPrompt({
+      question,
+      document,
+      sliceSummaries,
+    }),
+  });
+
+  return {
+    summary,
+    sliceCount: slices.length,
+  };
+}
+
+async function summarizeDocumentForFullDocumentMode({ document, question, apiKey, model, directCharBudget, modelConcurrency }) {
+  if (document.markdown.length <= directCharBudget) {
+    const summary = await generateGeminiAnswer({
+      apiKey,
+      model,
+      maxOutputTokens: 900,
+      systemInstruction: buildDocumentReduceSystemInstruction(),
+      prompt: buildWholeDocumentSummaryPrompt({
+        question,
+        document,
+      }),
+    });
+
+    return {
+      summary,
+      sliceCount: 1,
+    };
+  }
+
+  return summarizeLongDocumentWithSlices({
+    document,
+    question,
+    apiKey,
+    model,
+    modelConcurrency,
+  });
 }
 
 async function retrieveRelevantChunks({ question, tenantId, apiKey, retrievalMode, topK = 5 }) {
@@ -143,18 +250,23 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
     throw new Error("One or more selected documents were not found.");
   }
 
-  if (selectedDocuments.length > 5) {
-    throw new Error("Please select at most 5 documents at a time for full-document mode.");
+  const maxSelectedDocs = config.FULL_DOCUMENT_MAX_SELECTED_DOCS || 5;
+  if (selectedDocuments.length > maxSelectedDocs) {
+    throw new Error(`Please select at most ${maxSelectedDocs} documents at a time for full-document mode.`);
   }
 
-  const fullDocCharBudget = config.RAG_TOKEN_BUDGET * 4;
+  const directCharBudget = config.FULL_DOCUMENT_DIRECT_CHAR_BUDGET || 18000;
+  const synthesisCharBudget = config.FULL_DOCUMENT_SYNTHESIS_CHAR_BUDGET || 22000;
+  const modelConcurrency = config.FULL_DOCUMENT_MODEL_CONCURRENCY || 3;
   const combinedMarkdownLength = selectedDocuments.reduce((sum, doc) => sum + doc.markdown.length, 0);
   let answer;
   let structured = null;
   let rawModelText = "";
   let sliceCount = 1;
+  let processingMode = "direct";
+  let compressionPasses = 0;
 
-  if (combinedMarkdownLength <= fullDocCharBudget) {
+  if (selectedDocuments.length === 1 && combinedMarkdownLength <= directCharBudget) {
     const response = await generateStructuredGeminiAnswer({
       apiKey,
       model,
@@ -166,26 +278,45 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
     structured = response.structured;
     rawModelText = response.rawText || "";
   } else {
-    const blocks = buildDocumentSliceBlocks(selectedDocuments);
-    const slices = packDocumentBlocksIntoSlices(blocks);
-    sliceCount = slices.length;
-    const sliceSummaries = [];
-
-    for (let i = 0; i < slices.length; i += 1) {
-      const sliceSummary = await generateGeminiAnswer({
+    processingMode = "staged";
+    const documentResults = await mapWithConcurrency(selectedDocuments, modelConcurrency, async (document) => {
+      const sliceConcurrency = selectedDocuments.length > 1 ? 1 : modelConcurrency;
+      return summarizeDocumentForFullDocumentMode({
+        document,
+        question,
         apiKey,
         model,
-        maxOutputTokens: 500,
-        systemInstruction: buildDocumentSliceSystemInstruction(),
-        prompt: buildDocumentSlicePrompt({
-          question,
-          documents: selectedDocuments,
-          sliceText: slices[i],
-          sliceIndex: i + 1,
-          totalSlices: slices.length,
-        }),
+        directCharBudget,
+        modelConcurrency: sliceConcurrency,
       });
-      sliceSummaries.push(sliceSummary);
+    });
+    sliceCount = documentResults.reduce((sum, result) => sum + result.sliceCount, 0);
+    let documentSummaries = documentResults.map((result) => result.summary);
+
+    while (totalSummaryLength(documentSummaries) > synthesisCharBudget && compressionPasses < 4) {
+      const batches = packSummariesIntoBatches(documentSummaries, synthesisCharBudget);
+      const compressed = await mapWithConcurrency(batches, modelConcurrency, async (batch, index) => {
+        return generateGeminiAnswer({
+          apiKey,
+          model,
+          maxOutputTokens: 700,
+          systemInstruction: buildDocumentReduceSystemInstruction(),
+          prompt: buildCompressedSummariesPrompt({
+            question,
+            documents: selectedDocuments,
+            summaries: [batch],
+            batchIndex: index + 1,
+            totalBatches: batches.length,
+          }),
+        });
+      });
+
+      compressionPasses += 1;
+      if (totalSummaryLength(compressed) >= totalSummaryLength(documentSummaries)) {
+        documentSummaries = compressed;
+        break;
+      }
+      documentSummaries = compressed;
     }
 
     const response = await generateStructuredGeminiAnswer({
@@ -197,7 +328,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
         question,
         history,
         documents: selectedDocuments,
-        sliceSummaries,
+        documentSummaries,
       }),
     });
     answer = response.answer;
@@ -223,6 +354,9 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
       filename: document.filename,
     })),
     sliceCount,
+    processingMode,
+    documentCount: selectedDocuments.length,
+    compressionPasses,
   };
 }
 

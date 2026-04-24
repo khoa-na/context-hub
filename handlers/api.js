@@ -240,6 +240,9 @@ async function handleChat(req, res) {
     document: result.document || null,
     documents: result.documents || [],
     sliceCount: result.sliceCount || null,
+    processingMode: result.processingMode || null,
+    documentCount: result.documentCount || null,
+    compressionPasses: result.compressionPasses || 0,
     chunks: result.chunks.map(serializeChunk),
   });
 }
