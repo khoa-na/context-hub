@@ -206,6 +206,7 @@ cython_debug/
 
 # Node / app runtime
 node_modules/
+.tmp/
 data/
 
 # Marimo

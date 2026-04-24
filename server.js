@@ -24,6 +24,22 @@ const {
 const PORT = Number(process.env.PORT || 3000);
 const HOST = String(process.env.HOST || "0.0.0.0").trim();
 
+const ROUTES = [
+  ["GET", "/api/documents", handleDocuments],
+  ["POST", "/api/upload", handleUpload],
+  ["POST", "/api/wiki-upload", handleWikiUpload],
+  ["GET", "/api/wiki-list", handleWikiList],
+  ["POST", "/api/save-key", handleSaveKey],
+  ["POST", "/api/chat", handleChat],
+  ["POST", "/api/session/reset", handleSessionReset],
+  ["POST", "/api/search", handleSearch],
+  ["POST", "/api/reindex", handleReindex],
+];
+
+function findRoute(method, pathname) {
+  return ROUTES.find(([routeMethod, routePath]) => routeMethod === method && routePath === pathname);
+}
+
 async function serveStatic(_req, res, pathname) {
   const safePath = pathname === "/" ? "/index.html" : pathname;
   const filePath = path.join(PUBLIC_DIR, safePath);
@@ -43,57 +59,34 @@ async function serveStatic(_req, res, pathname) {
   }
 }
 
+function sendModelOptions(_req, res) {
+  return sendJson(res, 200, {
+    models: config.MODELS,
+    defaultModel: config.DEFAULT_MODEL,
+  });
+}
+
 async function router(req, res) {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    const route = findRoute(req.method, url.pathname);
 
-    if (req.method === "GET" && url.pathname === "/api/documents") {
-      return handleDocuments(req, res);
+    if (route) {
+      const [, , handler] = route;
+      return await handler(req, res);
     }
 
     if (req.method === "DELETE" && url.pathname.startsWith("/api/documents/")) {
       const docId = url.pathname.slice("/api/documents/".length);
-      return handleDeleteDocument(req, res, docId);
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/upload") {
-      return handleUpload(req, res);
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/wiki-upload") {
-      return handleWikiUpload(req, res);
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/wiki-list") {
-      return handleWikiList(req, res);
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/save-key") {
-      return handleSaveKey(req, res);
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/chat") {
-      return handleChat(req, res);
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/session/reset") {
-      return handleSessionReset(req, res);
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/search") {
-      return handleSearch(req, res);
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/reindex") {
-      return handleReindex(req, res);
+      return await handleDeleteDocument(req, res, docId);
     }
 
     if (req.method === "GET" && url.pathname === "/api/models") {
-      return sendJson(res, 200, { models: config.MODELS, defaultModel: config.DEFAULT_MODEL });
+      return sendModelOptions(req, res);
     }
 
     if (req.method === "GET") {
-      return serveStatic(req, res, url.pathname);
+      return await serveStatic(req, res, url.pathname);
     }
 
     sendJson(res, 405, { error: "Method not allowed." });
@@ -122,21 +115,28 @@ function getNetworkUrls(port) {
   return [...new Set(urls)];
 }
 
+function logStartupUrls(port, host) {
+  console.log(`context-hub running at http://localhost:${port}`);
+
+  if (host === "0.0.0.0") {
+    for (const url of getNetworkUrls(port)) {
+      console.log(`LAN access: ${url}`);
+    }
+    return;
+  }
+
+  if (host !== "127.0.0.1" && host !== "localhost") {
+    console.log(`Bound to: http://${host}:${port}`);
+  }
+}
+
 async function start() {
   await ensureStorage();
   await autoIndexUnindexedDocs();
 
   const server = http.createServer(router);
   server.listen(PORT, HOST, () => {
-    console.log(`context-hub running at http://localhost:${PORT}`);
-    if (HOST === "0.0.0.0") {
-      const networkUrls = getNetworkUrls(PORT);
-      for (const url of networkUrls) {
-        console.log(`LAN access: ${url}`);
-      }
-    } else if (HOST !== "127.0.0.1" && HOST !== "localhost") {
-      console.log(`Bound to: http://${HOST}:${PORT}`);
-    }
+    logStartupUrls(PORT, HOST);
   });
 }
 
