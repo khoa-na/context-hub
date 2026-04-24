@@ -39,6 +39,7 @@ const wikiUploadStatus = document.querySelector("#wiki-upload-status");
 const wikiList = document.querySelector("#wiki-list");
 
 let sessionApiKey = "";
+const FULL_DOCUMENT_MAX_SELECTED_DOCS = 5;
 
 const dropzone = fileInput.closest(".dropzone");
 const wikiDropzone = wikiFileInput.closest(".dropzone");
@@ -149,9 +150,10 @@ function renderDocumentPicker() {
   docPickerList.innerHTML = state.documents
     .map((doc) => {
       const checked = state.selectedDocIds.has(doc.id) ? "checked" : "";
+      const disabled = !checked && state.selectedDocIds.size >= FULL_DOCUMENT_MAX_SELECTED_DOCS ? "disabled" : "";
       return `
         <label class="doc-picker-item">
-          <input type="checkbox" value="${escapeHtml(doc.id)}" ${checked} />
+          <input type="checkbox" value="${escapeHtml(doc.id)}" ${checked} ${disabled} />
           <span class="doc-picker-title">${escapeHtml(doc.title)}</span>
           <span class="doc-picker-meta">${escapeHtml(doc.filename)} · ${doc.chunkCount} chunks</span>
         </label>
@@ -162,16 +164,24 @@ function renderDocumentPicker() {
   docPickerList.querySelectorAll("input[type=checkbox]").forEach((cb) => {
     cb.addEventListener("change", () => {
       if (cb.checked) {
+        if (state.selectedDocIds.size >= FULL_DOCUMENT_MAX_SELECTED_DOCS) {
+          cb.checked = false;
+          return;
+        }
         state.selectedDocIds.add(cb.value);
       } else {
         state.selectedDocIds.delete(cb.value);
       }
+      renderDocumentPicker();
     });
   });
 }
 
 function selectAllDocuments() {
-  state.documents.forEach((doc) => state.selectedDocIds.add(doc.id));
+  state.selectedDocIds.clear();
+  state.documents
+    .slice(0, FULL_DOCUMENT_MAX_SELECTED_DOCS)
+    .forEach((doc) => state.selectedDocIds.add(doc.id));
   renderDocumentPicker();
 }
 
@@ -200,7 +210,7 @@ docSelectAllBtn.addEventListener("click", selectAllDocuments);
 docClearAllBtn.addEventListener("click", clearAllDocuments);
 
 function getSelectedDocumentIds() {
-  return Array.from(state.selectedDocIds);
+  return Array.from(state.selectedDocIds).slice(0, FULL_DOCUMENT_MAX_SELECTED_DOCS);
 }
 
 function updateChatModeUI() {
