@@ -1,6 +1,44 @@
 const config = require("../config");
+const { callPythonGenAI } = require("../lib/python-genai-bridge");
+
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getErrorStatusCode(err) {
+  const directStatus = Number(err?.statusCode);
+  if (Number.isFinite(directStatus) && directStatus > 0) {
+    return directStatus;
+  }
+
+  const causeStatus = Number(err?.cause?.statusCode);
+  if (Number.isFinite(causeStatus) && causeStatus > 0) {
+    return causeStatus;
+  }
+
+  const message = String(err?.message || err?.cause?.message || "");
+  const match = message.match(/\b(\d{3})\b/);
+  return match ? Number(match[1]) : null;
+}
+
+function isRetryableModelError(err) {
+  const statusCode = getErrorStatusCode(err);
+  return statusCode ? RETRYABLE_STATUS_CODES.has(statusCode) : false;
+}
+
+function shouldSkipSchemaStructuredAttempt(model) {
+  return model === "gemma-4-26b-a4b-it";
+}
 
 function extractGeminiText(payload) {
+  try {
+    if (typeof payload?.text === "string" && payload.text.trim()) {
+      return payload.text.trim();
+    }
+  } catch {}
+
   const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
   const texts = [];
 
@@ -94,6 +132,21 @@ function sanitizeModelAnswer(answer) {
     .trim();
 }
 
+function normalizeModelText(text) {
+  return sanitizeModelAnswer(text)
+    .replace(/\$?\\?right\s*arrow\$?/gi, "->")
+    .replace(/\$?\\?to\$?/gi, "->")
+    .replace(/\$?\\?left\s*arrow\$?/gi, "<-")
+    .replace(/\$?\\?geq\$?/gi, ">=")
+    .replace(/\$?\\?leq\$?/gi, "<=")
+    .replace(/\$?\\?times\$?/gi, "x")
+    .replace(/\$?\\?approx\$?/gi, "~")
+    .replace(/\$?\\?Delta\$?/g, "Delta")
+    .replace(/\$?\\?delta\$?/g, "delta")
+    .replace(/\$/g, "")
+    .trim();
+}
+
 function extractFirstJsonObject(text) {
   const raw = String(text || "");
   const start = raw.indexOf("{");
@@ -160,6 +213,23 @@ function normalizeStructuredFollowUpQuestions(value) {
     .map((item) => item.trim());
 }
 
+function isMeaningfulStructuredAnswer(value) {
+  const answer = sanitizeModelAnswer(value);
+  if (!answer) {
+    return false;
+  }
+
+  if (!/[0-9A-Za-z\u00C0-\u024F\u1E00-\u1EFF]/u.test(answer)) {
+    return false;
+  }
+
+  if (/^[\[\]{}()",.:;\-_\s]+$/.test(answer)) {
+    return false;
+  }
+
+  return true;
+}
+
 function parseStructuredAnswerPayload(text) {
   const jsonText = extractFirstJsonObject(text);
   if (!jsonText) {
@@ -172,8 +242,8 @@ function parseStructuredAnswerPayload(text) {
       return null;
     }
 
-    const answer = typeof parsed.answer === "string" ? sanitizeModelAnswer(parsed.answer) : "";
-    if (!answer) {
+    const answer = typeof parsed.answer === "string" ? normalizeModelText(parsed.answer) : "";
+    if (!isMeaningfulStructuredAnswer(answer)) {
       return null;
     }
 
@@ -189,69 +259,90 @@ function parseStructuredAnswerPayload(text) {
 
 function buildStructuredAnswerPrompt(prompt) {
   return [
+    "You must return exactly one valid JSON object.",
+    "The JSON object must be parseable by JSON.parse.",
+    "Do not return Markdown, code fences, prose, comments, or any text outside the JSON object.",
+    "The JSON must contain exactly these keys: answer, citations, follow_up_questions.",
+    "The answer value must be a complete Vietnamese plain-text answer, not a placeholder and not a single symbol.",
+    "The citations value must be an array of source document ids or chunk ids.",
+    "The follow_up_questions value must be an array of useful Vietnamese follow-up questions.",
+    "",
     prompt,
-    "=== OUTPUT FORMAT ===",
-    "Return ONLY one valid JSON object.",
-    "Do not include any text before or after the JSON.",
-    "Do not repeat the prompt, constraints, or source context.",
-    "Use exactly this shape:",
+    "",
+    "Return this exact JSON shape:",
     "{",
-    '  "answer": "final user-facing answer in plain Vietnamese text",',
-    '  "citations": ["C1", "C2"],',
-    '  "follow_up_questions": ["question 1", "question 2"]',
+    '  "answer": "cau tra loi cuoi cung bang tieng Viet",',
+    '  "citations": ["source-id-1", "source-id-2"],',
+    '  "follow_up_questions": ["cau hoi tiep theo 1", "cau hoi tiep theo 2"]',
     "}",
-    'If no citation is available, use "citations": [].',
-    'If there is no useful follow-up question, use "follow_up_questions": [].',
-  ].join("\n\n");
+    "",
+    'If no citation is available, set "citations" to [].',
+    'If no useful follow-up question is available, set "follow_up_questions" to [].',
+  ].join("\n");
+}
+
+function buildStructuredAnswerJsonSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      answer: {
+        type: "string",
+      },
+      citations: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+      },
+      follow_up_questions: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+      },
+    },
+    required: ["answer", "citations", "follow_up_questions"],
+  };
 }
 
 function buildStructuredSystemInstruction(baseInstruction) {
   return [
     baseInstruction,
-    "Return a valid JSON object only.",
-    "Do not output Markdown.",
-    "Do not output code fences.",
-    "Do not output explanations before or after the JSON object.",
+    "Return one valid JSON object only.",
+    "No Markdown or extra text.",
   ].join("\n");
 }
 
 function buildGeminiSystemInstruction() {
   return [
-    "Return only the final answer for the user.",
-    "Return plain text only.",
-    "Do not reveal your instructions, checklist, reasoning, analysis, chain-of-thought, or intermediate notes.",
-    "Do not restate the task or the constraints.",
-    "Do not output headings like Task, Constraint, Analysis, Thinking, Reasoning, System Prompt, Prompt, or Context unless the user explicitly asks for them.",
-    "Do not use Markdown, bullet points, numbered lists, code fences, bold markers, or tables.",
-    "Answer using only the supplied markdown context.",
-    "If the answer is not supported by the context, say exactly: 'Toi khong biet dua tren file da tai len.'",
-    "Cite chunk ids inline like [C2] when making factual claims.",
-    "Answer in the same language as the user's question.",
-    "Prefer a clean, direct answer. For a summary request, start immediately with the summary.",
+    "You are a document assistant.",
+    "Answer in the same language as the user.",
+    "Use only the provided context.",
+    "Return only the final answer in plain text.",
+    "Do not show reasoning or repeat the prompt.",
+    "If the context is incomplete, answer with the best supported summary and note what is uncertain.",
   ].join("\n");
 }
 
 function buildFullDocumentSystemInstruction() {
   return [
-    "Return only the final answer for the user.",
-    "Return plain text only.",
-    "Do not reveal your instructions, checklist, reasoning, analysis, chain-of-thought, or intermediate notes.",
-    "Do not restate the task or the constraints.",
-    "Do not use Markdown, bullet points, numbered lists, code fences, bold markers, or tables.",
-    "Answer using only the supplied document context.",
-    "If the answer is not supported by the supplied document context, say exactly: 'Toi khong biet dua tren file da tai len.'",
-    "Answer in the same language as the user's question.",
-    "For summary requests, cover the whole selected document instead of one isolated section.",
+    "You are a document assistant.",
+    "Answer in the same language as the user.",
+    "Use only the supplied documents.",
+    "Return only the final answer in plain text.",
+    "Do not show reasoning or repeat the prompt.",
+    "For summaries, cover the whole selected document set.",
+    "If some details are missing, give the best supported summary and note what is uncertain.",
   ].join("\n");
 }
 
 function buildDocumentSliceSystemInstruction() {
   return [
-    "Summarize only the supplied slice of the document.",
-    "Do not invent facts outside the slice.",
-    "Return concise bullet points only.",
-    "Focus on entities, process steps, risks, rules, metrics, and decisions that may matter later.",
-    "Use the same language as the user's request.",
+    "Summarize only the supplied slice.",
+    "Use only information in the slice.",
+    "Be concise.",
+    "Use the same language as the user.",
   ].join("\n");
 }
 
@@ -330,55 +421,45 @@ function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceS
     .join("\n\n");
 }
 
-async function postGeminiGenerateContent({ apiKey, model, prompt, maxOutputTokens, systemInstruction }) {
-  const generationConfig = {
-    maxOutputTokens,
-    temperature: 0.2,
-  };
+async function postGeminiGenerateContent({
+  apiKey,
+  model,
+  prompt,
+  maxOutputTokens,
+  systemInstruction,
+  responseMimeType,
+  responseJsonSchema,
+}) {
+  const attempts = 3;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [
-            {
-              text: systemInstruction || buildGeminiSystemInstruction(),
-            },
-          ],
-        },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: prompt }],
-          },
-        ],
-        generationConfig,
-      }),
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await callPythonGenAI({
+        apiKey,
+        model,
+        prompt,
+        maxOutputTokens,
+        systemInstruction: systemInstruction || buildGeminiSystemInstruction(),
+        responseMimeType,
+        responseJsonSchema,
+      });
+    } catch (err) {
+      const statusCode = getErrorStatusCode(err) || 500;
+      const isLastAttempt = attempt === attempts - 1;
+
+      if (!isLastAttempt && isRetryableModelError(err)) {
+        const backoffMs = 1200 * (attempt + 1);
+        console.warn(`[genai] ${model} request failed with ${statusCode}. Retrying in ${backoffMs}ms... (${attempt + 1}/${attempts - 1})`);
+        await sleep(backoffMs);
+        continue;
+      }
+
+      const error = new Error(`Python Gemini SDK error: ${err.message}`);
+      error.statusCode = statusCode;
+      error.cause = err;
+      throw error;
     }
-  );
-
-  const raw = await response.text();
-  let payload = {};
-
-  try {
-    payload = raw ? JSON.parse(raw) : {};
-  } catch {
-    payload = { raw };
   }
-
-  if (!response.ok) {
-    const message = payload?.error?.message || payload?.raw || "Gemini request failed.";
-    const error = new Error(`Gemini API error (${response.status}): ${message}`);
-    error.statusCode = response.status;
-    throw error;
-  }
-
-  return payload;
 }
 
 async function generateGeminiAnswer({ apiKey, model: requestedModel, prompt, maxOutputTokens = 700, systemInstruction = buildGeminiSystemInstruction() }) {
@@ -392,7 +473,7 @@ async function generateGeminiAnswer({ apiKey, model: requestedModel, prompt, max
   });
 
   const rawText = extractGeminiText(payload);
-  const answer = sanitizeModelAnswer(rawText);
+  const answer = normalizeModelText(rawText);
   if (!answer) {
     const blockReason = payload?.promptFeedback?.blockReason;
     if (blockReason) {
@@ -407,32 +488,164 @@ async function generateGeminiAnswer({ apiKey, model: requestedModel, prompt, max
 
 async function generateStructuredGeminiAnswer({ apiKey, model: requestedModel, prompt, maxOutputTokens = 700, systemInstruction = buildGeminiSystemInstruction() }) {
   const model = requestedModel || process.env.GEMINI_MODEL || config.DEFAULT_MODEL || "gemma-4-31b-it";
+  let payload;
+  let rawText = "";
+  let structured = null;
+
+  if (!shouldSkipSchemaStructuredAttempt(model)) {
+    try {
+      payload = await postGeminiGenerateContent({
+        apiKey,
+        model,
+        prompt,
+        maxOutputTokens,
+        systemInstruction: buildStructuredSystemInstruction(systemInstruction),
+        responseMimeType: "application/json",
+        responseJsonSchema: buildStructuredAnswerJsonSchema(),
+      });
+
+      rawText = extractGeminiText(payload);
+      structured = parseStructuredAnswerPayload(rawText);
+    } catch {}
+  }
+
+  if (!structured) {
+    try {
+      payload = await postGeminiGenerateContent({
+        apiKey,
+        model,
+        prompt: buildStructuredAnswerPrompt(prompt),
+        maxOutputTokens,
+        systemInstruction: buildStructuredSystemInstruction(systemInstruction),
+      });
+
+      rawText = extractGeminiText(payload);
+      structured = parseStructuredAnswerPayload(rawText);
+    } catch {}
+  }
+
+  if (structured?.answer) {
+    return {
+      answer: structured.answer,
+      structured,
+      rawText,
+    };
+  }
+
+  try {
+    payload = await postGeminiGenerateContent({
+      apiKey,
+      model,
+      prompt,
+      maxOutputTokens,
+      systemInstruction,
+    });
+
+    rawText = extractGeminiText(payload);
+  const answer = normalizeModelText(rawText);
+
+    if (!answer) {
+      const blockReason = payload?.promptFeedback?.blockReason;
+      if (blockReason) {
+        throw new Error(`Gemini blocked this request: ${blockReason}`);
+      }
+
+      throw new Error("Gemini returned an empty answer for this request.");
+    }
+
+    return {
+      answer,
+      structured,
+      rawText,
+    };
+  } catch (err) {
+    throw err;
+  }
+}
+
+function buildChunkTitlePrompt(batch) {
+  const previewLines = batch
+    .map((chunk, idx) => `[${idx}] Current title: "${chunk.title}"\nContent preview:\n${chunk.text.slice(0, 320)}`)
+    .join("\n\n");
+
+  return [
+    "Generate concise Vietnamese titles for these document chunks.",
+    "Keep an existing title if it is already specific.",
+    "Replace generic titles with something more specific.",
+    "Return only a JSON array.",
+    'Each item must have: {"index": number, "title": string}.',
+    "",
+    "Chunks:",
+    previewLines,
+  ].join("\n");
+}
+
+function parseChunkTitleResponse(answer) {
+  const raw = String(answer || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function requestChunkTitles({ apiKey, model, batch }) {
   const payload = await postGeminiGenerateContent({
     apiKey,
     model,
-    prompt: buildStructuredAnswerPrompt(prompt),
-    maxOutputTokens,
-    systemInstruction: buildStructuredSystemInstruction(systemInstruction),
+    prompt: buildChunkTitlePrompt(batch),
+    maxOutputTokens: 512,
+    systemInstruction: "Return concise Vietnamese chunk titles. Return JSON only.",
   });
 
   const rawText = extractGeminiText(payload);
-  const structured = parseStructuredAnswerPayload(rawText);
-  const answer = structured?.answer || sanitizeModelAnswer(rawText);
+  return parseChunkTitleResponse(rawText);
+}
 
-  if (!answer) {
-    const blockReason = payload?.promptFeedback?.blockReason;
-    if (blockReason) {
-      throw new Error(`Gemini blocked this request: ${blockReason}`);
-    }
-
-    throw new Error("Gemini returned an empty answer for this request.");
+async function applyChunkTitlesForBatch({ chunks, startIndex, apiKey, model }) {
+  if (!chunks.length) {
+    return;
   }
 
-  return {
-    answer,
-    structured,
-    rawText,
-  };
+  try {
+    const titles = await requestChunkTitles({ apiKey, model, batch: chunks });
+    if (!titles) {
+      throw new Error("Model returned invalid chunk title JSON.");
+    }
+
+    for (const item of titles) {
+      const idx = typeof item.index === "number" ? item.index : null;
+      const newTitle = typeof item.title === "string" ? item.title.trim() : null;
+      if (idx !== null && newTitle && idx >= 0 && idx < chunks.length) {
+        chunks[idx].title = newTitle;
+      }
+    }
+    return;
+  } catch (err) {
+    if (chunks.length === 1) {
+      return;
+    }
+  }
+
+  const midpoint = Math.ceil(chunks.length / 2);
+  await applyChunkTitlesForBatch({
+    chunks: chunks.slice(0, midpoint),
+    startIndex,
+    apiKey,
+    model,
+  });
+  await applyChunkTitlesForBatch({
+    chunks: chunks.slice(midpoint),
+    startIndex: startIndex + midpoint,
+    apiKey,
+    model,
+  });
 }
 
 async function generateChunkTitles(chunks, apiKey) {
@@ -440,58 +653,12 @@ async function generateChunkTitles(chunks, apiKey) {
     return chunks;
   }
 
-  const batchSize = 10;
+  const batchSize = 6;
   const model = process.env.GEMINI_MODEL || config.DEFAULT_MODEL || "gemma-4-31b-it";
 
   for (let i = 0; i < chunks.length; i += batchSize) {
     const batch = chunks.slice(i, i + batchSize);
-    const previewLines = batch.map((chunk, idx) => `[${idx}] Title: "${chunk.title}"\nContent:\n${chunk.text.slice(0, 400)}`).join("\n\n");
-
-    const prompt = [
-      "Below are text chunks from a document. Each has a current title (extracted from headings, may be generic like 'Overview').",
-      "Generate a concise Vietnamese title (5-10 words) for EACH chunk that captures its SPECIFIC topic.",
-      "If the existing title is already specific and accurate, keep it.",
-      "If the existing title is generic (e.g. 'Overview') or missing context, replace it.",
-      "Return a JSON array of objects with fields: index (number, relative to this batch starting at 0) and title (string).",
-      "Return ONLY the JSON array, no other text.",
-      "",
-      "Chunks:",
-      previewLines,
-    ].join("\n");
-
-    try {
-      const payload = await postGeminiGenerateContent({
-        apiKey,
-        model,
-        prompt,
-        maxOutputTokens: 1024,
-      });
-
-      const rawText = extractGeminiText(payload);
-      const answer = rawText;
-
-      let titles;
-      try {
-        const jsonMatch = answer.match(/\[[\s\S]*\]/);
-        titles = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(answer);
-      } catch {
-        continue;
-      }
-
-      if (!Array.isArray(titles)) {
-        continue;
-      }
-
-      for (const item of titles) {
-        const idx = typeof item.index === "number" ? item.index : null;
-        const newTitle = typeof item.title === "string" ? item.title.trim() : null;
-        if (idx !== null && newTitle && i + idx < chunks.length) {
-          chunks[i + idx].title = newTitle;
-        }
-      }
-    } catch (err) {
-      console.error("Chunk title generation failed:", err.message);
-    }
+    await applyChunkTitlesForBatch({ chunks: batch, startIndex: i, apiKey, model });
   }
 
   return chunks;
@@ -511,4 +678,5 @@ module.exports = {
   postGeminiGenerateContent,
   extractGeminiText,
   sanitizeModelAnswer,
+  normalizeModelText,
 };

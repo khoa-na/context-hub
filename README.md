@@ -17,8 +17,7 @@ This branch includes:
 - Full-document mode for up to 5 selected documents at a time
 - Chat model selector with 2 Gemma 4 options: `gemma-4-31b-it` and `gemma-4-26b-a4b-it`
 - Retrieval-only debug mode via `/api/search`
-- Optional Jina rerank in debug mode
-- Save Gemini and Jina API keys from the UI into `.env`
+- Save Gemini API keys from the UI into `.env`
 - LAN-friendly startup logging when the server is bound outside localhost
 
 ## Core Flows
@@ -63,7 +62,6 @@ Question + selected documents
 Question
   -> /api/search
   -> retrieve with hybrid / semantic / bm25
-  -> optionally rerank with Jina
   -> return ranked chunks without calling the chat model
 ```
 
@@ -79,7 +77,6 @@ services/gemini.js         Prompt builders and Gemini client calls
 services/indexing.js       Document indexing and reindexing workflow
 db.js                      LanceDB indexing and retrieval (BM25, semantic, hybrid RRF)
 embedding.js               Gemini embedding API client
-rerank.js                  Jina rerank adapter for debug mode
 lib/markdown.js            File-to-Markdown conversion helpers
 lib/chunking.js            Chunking and document section slicing
 lib/storage.js             Local metadata, wiki loading, env persistence
@@ -106,7 +103,6 @@ data/sessions/             Session history JSON files
 | Parent-child retrieval | `db.js` / `services/chat.js` | Search by child chunk, answer with parent section context |
 | Gemini title rewriting | `services/gemini.js` | Replace generic headings with more specific chunk titles |
 | Wiki injection | `lib/storage.js` / `services/chat.js` | Always include static wiki Markdown in final context |
-| Optional rerank | `rerank.js` / `services/chat.js` | Reorder retrieved chunks with Jina in debug mode |
 
 ## Run Locally
 
@@ -115,7 +111,6 @@ data/sessions/             Session history JSON files
 
 ```env
 GEMINI_API_KEY=your_gemini_key
-JINA_API_KEY=your_jina_key
 GEMINI_MODEL=gemma-4-31b-it
 PORT=3000
 HOST=0.0.0.0
@@ -156,7 +151,7 @@ If `HOST=0.0.0.0`, startup logs will also print LAN URLs such as `http://192.168
 |---|---|---|
 | `/api/upload` | POST | Upload a file, convert to Markdown, and optionally index it |
 | `/api/chat` | POST | Retrieval Q&A or full-document answer generation |
-| `/api/search` | POST | Retrieval-only debug endpoint with optional Jina rerank |
+| `/api/search` | POST | Retrieval-only debug endpoint |
 | `/api/documents` | GET | List uploaded document metadata |
 | `/api/documents/:id` | DELETE | Delete a document and remove its indexed chunks |
 | `/api/wiki-upload` | POST | Upload a `.md` / `.txt` file into `wiki/default/` |
@@ -164,7 +159,6 @@ If `HOST=0.0.0.0`, startup logs will also print LAN URLs such as `http://192.168
 | `/api/reindex` | POST | Re-index all documents |
 | `/api/models` | GET | Return the configured chat-model options |
 | `/api/save-key` | POST | Save `GEMINI_API_KEY` into `.env` |
-| `/api/save-jina-key` | POST | Save `JINA_API_KEY` into `.env` |
 | `/api/session/reset` | POST | Start a fresh local chat session |
 
 ## Example Request Shapes
@@ -186,16 +180,13 @@ If `HOST=0.0.0.0`, startup logs will also print LAN URLs such as `http://192.168
 | Variable | Default | Description |
 |---|---|---|
 | `GEMINI_API_KEY` | — | Required for semantic retrieval, indexing, and chat generation |
-| `JINA_API_KEY` | — | Optional. Required only for Jina rerank |
 | `GEMINI_MODEL` | `gemma-4-31b-it` | Default answer-generation model used by `services/gemini.js` |
-| `JINA_RERANK_MODEL` | `jina-reranker-v2-base-multilingual` | Jina rerank model |
 | `PORT` | `3000` | Server port |
 | `HOST` | `0.0.0.0` | Bind address. Use `127.0.0.1` for local-only access |
 
 Code-level config in `config.js`:
 - `WIKI_TOKEN_BUDGET`
 - `RAG_TOKEN_BUDGET`
-- `RERANK_CANDIDATES`
 - `MODELS`
 - `DEFAULT_MODEL`
 - embedding settings and paths
@@ -205,7 +196,6 @@ Code-level config in `config.js`:
 - Semantic and hybrid retrieval require Gemini embeddings.
 - BM25 mode can work without Gemini embeddings, but answer generation still needs Gemini.
 - Wiki files are injected directly into prompts and are not returned by `/api/search`.
-- Jina rerank currently runs only in debug retrieval mode.
 - Full-document mode falls back to slice-and-synthesize when selected content exceeds the token budget.
 - `data/index.json` is local metadata and may change during testing; document content and LanceDB storage stay local on each machine.
 - The repo currently has no automated test suite wired into `package.json`.

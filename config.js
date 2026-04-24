@@ -3,7 +3,6 @@ const path = require("path");
 module.exports = {
   WIKI_TOKEN_BUDGET: 30000,
   RAG_TOKEN_BUDGET: 10000,
-  RERANK_CANDIDATES: 12,
   WIKI_DIR: path.join(__dirname, "wiki"),
   LANCEDB_DIR: path.join(__dirname, "data", "lancedb"),
   GEMINI_EMBEDDING_MODEL: "gemini-embedding-001",

@@ -36,15 +36,6 @@
           </div>
           <p id="key-status" class="status-line"></p>
         </div>
-
-        <div class="settings-group">
-          <label class="field-label" for="jina-api-key-input">Jina API key</label>
-          <div class="inline-field">
-            <input id="jina-api-key-input" type="password" placeholder="Paste your Jina key, then press Save" autocomplete="off" spellcheck="false" />
-            <button id="save-jina-key-button" class="btn-accent" type="button">Save to .env</button>
-          </div>
-          <p id="jina-key-status" class="status-line"></p>
-        </div>
         <label class="checkbox-row">
           <input id="show-key-toggle" type="checkbox" />
           <span>Show keys</span>
@@ -57,12 +48,12 @@
         <section class="sidebar-section">
           <h3 class="sidebar-title">Upload Document</h3>
           <label class="dropzone" for="file-input">
-            <input id="file-input" type="file" accept=".txt,.text,.log,.md,.mdx,.json,.csv,.tsv,.html,.htm,.xml,.docx,.js,.jsx,.ts,.tsx,.py,.java,.go,.rb,.rs,.sql,.css,.yaml,.yml" />
+            <input id="file-input" type="file" multiple accept=".txt,.text,.log,.md,.mdx,.json,.csv,.tsv,.html,.htm,.xml,.docx,.js,.jsx,.ts,.tsx,.py,.java,.go,.rb,.rs,.sql,.css,.yaml,.yml" />
             <span class="dropzone-icon">&#128462;</span>
-            <span id="selected-file-name">Drop a file or click to browse</span>
+            <span id="selected-file-name">Drop one or more files or click to browse</span>
             <small>Supported: .txt .md .json .csv .docx .html and more</small>
           </label>
-          <button id="upload-button" class="btn-accent full-width" type="button" disabled>Upload & Index</button>
+          <button id="upload-button" class="btn-accent full-width" type="button" disabled>Upload & Index All</button>
           <p id="upload-status" class="status-line"></p>
         </section>
 
@@ -113,10 +104,6 @@
               <label class="debug-toggle-row">
                 <input id="debug-search-toggle" type="checkbox" />
                 <span>Debug retrieval only</span>
-              </label>
-              <label class="debug-toggle-row">
-                <input id="rerank-toggle" type="checkbox" />
-                <span>Rerank with Jina</span>
               </label>
             </div>
             <div id="document-focus-row" class="document-focus-row" hidden>

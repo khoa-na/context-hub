@@ -19,7 +19,6 @@ const {
   handleWikiUpload,
   handleWikiList,
   handleSaveKey,
-  handleSaveJinaKey,
 } = require("./handlers/api");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -71,10 +70,6 @@ async function router(req, res) {
 
     if (req.method === "POST" && url.pathname === "/api/save-key") {
       return handleSaveKey(req, res);
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/save-jina-key") {
-      return handleSaveJinaKey(req, res);
     }
 
     if (req.method === "POST" && url.pathname === "/api/chat") {

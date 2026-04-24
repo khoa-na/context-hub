@@ -1,6 +1,5 @@
 const config = require("../config");
 const { semanticSearch, bm25Search, hybridSearch } = require("../db");
-const { rerankWithJina } = require("../rerank");
 const { loadWikiContext, loadAllDocumentsWithMarkdown } = require("../lib/storage");
 const { truncateToTokenBudget } = require("../lib/text");
 const { getDocumentSections } = require("../lib/chunking");
@@ -124,34 +123,6 @@ function serializeChunk(chunk) {
   };
 }
 
-async function maybeRerankChunks({ question, chunks, rerank }) {
-  if (!rerank || !chunks.length) {
-    return {
-      chunks,
-      rerankApplied: false,
-      rerankProvider: null,
-    };
-  }
-
-  const provider = String(rerank.provider || "").trim().toLowerCase();
-  if (provider !== "jina") {
-    throw new Error(`Unsupported rerank provider: ${provider}`);
-  }
-
-  const reranked = await rerankWithJina({
-    query: question,
-    chunks,
-    apiKey: rerank.apiKey,
-    topK: rerank.topK,
-  });
-
-  return {
-    chunks: reranked,
-    rerankApplied: true,
-    rerankProvider: provider,
-  };
-}
-
 async function answerWithFullDocument({ question, history, apiKey: requestApiKey, model, documentId, documentIds = [] }) {
   const apiKey = requestApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -180,6 +151,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
   const combinedMarkdownLength = selectedDocuments.reduce((sum, doc) => sum + doc.markdown.length, 0);
   let answer;
   let structured = null;
+  let rawModelText = "";
   let sliceCount = 1;
 
   if (combinedMarkdownLength <= fullDocCharBudget) {
@@ -192,6 +164,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
     });
     answer = response.answer;
     structured = response.structured;
+    rawModelText = response.rawText || "";
   } else {
     const blocks = buildDocumentSliceBlocks(selectedDocuments);
     const slices = packDocumentBlocksIntoSlices(blocks);
@@ -229,11 +202,13 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
     });
     answer = response.answer;
     structured = response.structured;
+    rawModelText = response.rawText || "";
   }
 
   return {
     answer,
     structured,
+    rawModelText,
     chunks: selectedDocuments.map(buildFullDocumentSource),
     retrievalMode: "full-document",
     chatMode: "full-document",
@@ -301,6 +276,7 @@ async function callGemini({ question, history, apiKey: requestApiKey, model, ten
   return {
     answer: response.answer,
     structured: response.structured,
+    rawModelText: response.rawText || "",
     chunks: ragChunks,
     retrievalMode: selectedRetrievalMode,
   };
@@ -312,7 +288,6 @@ module.exports = {
   normalizeChatMode,
   retrieveRelevantChunks,
   serializeChunk,
-  maybeRerankChunks,
   answerWithFullDocument,
   callGemini,
 };
