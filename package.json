@@ -8,7 +8,6 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@google/genai": "^1.50.1",
     "@lancedb/lancedb": "^0.27.2",
     "busboy": "^1.6.0",
     "dotenv": "^17.4.2",

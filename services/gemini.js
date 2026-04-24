@@ -1,19 +1,5 @@
 const config = require("../config");
-const { getGoogleGenAI, getGoogleErrorStatus, getGoogleErrorMessage } = require("../lib/google-genai");
 const { callPythonGenAI } = require("../lib/python-genai-bridge");
-
-function shouldUsePythonGenAI(model) {
-  const transport = String(process.env.GOOGLE_GENAI_TRANSPORT || "auto").trim().toLowerCase();
-  if (transport === "python") {
-    return true;
-  }
-
-  if (transport === "node" || transport === "js" || transport === "javascript") {
-    return false;
-  }
-
-  return model === "gemma-4-26b-a4b-it" || model === "gemma-4-31b-it";
-}
 
 function shouldSkipSchemaStructuredAttempt(model) {
   return model === "gemma-4-26b-a4b-it";
@@ -417,52 +403,19 @@ async function postGeminiGenerateContent({
   responseMimeType,
   responseJsonSchema,
 }) {
-  if (shouldUsePythonGenAI(model)) {
-    try {
-      return await callPythonGenAI({
-        apiKey,
-        model,
-        prompt,
-        maxOutputTokens,
-        systemInstruction: systemInstruction || buildGeminiSystemInstruction(),
-        responseMimeType,
-        responseJsonSchema,
-      });
-    } catch (err) {
-      const error = new Error(`Python Gemini SDK error: ${err.message}`);
-      error.statusCode = 500;
-      error.cause = err;
-      throw error;
-    }
-  }
-
-  const ai = getGoogleGenAI(apiKey);
-
   try {
-    const requestConfig = {
-      systemInstruction: systemInstruction || buildGeminiSystemInstruction(),
-      maxOutputTokens,
-      temperature: 0.2,
-    };
-
-    if (responseMimeType) {
-      requestConfig.responseMimeType = responseMimeType;
-    }
-
-    if (responseJsonSchema) {
-      requestConfig.responseJsonSchema = responseJsonSchema;
-    }
-
-    return await ai.models.generateContent({
+    return await callPythonGenAI({
+      apiKey,
       model,
-      contents: prompt,
-      config: requestConfig,
+      prompt,
+      maxOutputTokens,
+      systemInstruction: systemInstruction || buildGeminiSystemInstruction(),
+      responseMimeType,
+      responseJsonSchema,
     });
   } catch (err) {
-    const status = getGoogleErrorStatus(err);
-    const message = getGoogleErrorMessage(err, "Gemini request failed.");
-    const error = new Error(status ? `Gemini API error (${status}): ${message}` : `Gemini API error: ${message}`);
-    error.statusCode = status || 500;
+    const error = new Error(`Python Gemini SDK error: ${err.message}`);
+    error.statusCode = 500;
     error.cause = err;
     throw error;
   }

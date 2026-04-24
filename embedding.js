@@ -1,28 +1,25 @@
 const config = require("./config");
-const { getGoogleGenAI, getGoogleErrorStatus, getGoogleErrorMessage } = require("./lib/google-genai");
+const { callPythonGenAIEmbed } = require("./lib/python-genai-bridge");
 
 async function getGeminiEmbedding(text, apiKey, taskType = "RETRIEVAL_DOCUMENT", retries = 3) {
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const ai = getGoogleGenAI(apiKey);
-
     try {
-      const response = await ai.models.embedContent({
+      const response = await callPythonGenAIEmbed({
+        apiKey,
         model: config.GEMINI_EMBEDDING_MODEL,
-        contents: text,
-        config: {
-          taskType,
-          outputDimensionality: config.EMBEDDING_DIMENSION || 768,
-        },
+        contents: [text],
+        taskType,
+        outputDimensionality: config.EMBEDDING_DIMENSION || 768,
       });
 
-      const values = response?.embeddings?.[0]?.values;
+      const values = response?.embeddings?.[0];
       if (!values || !values.length) {
-        throw new Error("No embedding values returned from Google GenAI SDK.");
+        throw new Error("No embedding values returned from Python Google GenAI bridge.");
       }
 
       return values;
     } catch (err) {
-      const status = getGoogleErrorStatus(err);
+      const status = err?.statusCode || err?.cause?.statusCode || null;
       if (status === 429 && attempt < retries) {
         const retryAfter = 30 + Math.random() * 5;
         console.log(`[embed] Rate limited (429), retrying in ${retryAfter.toFixed(1)}s... (attempt ${attempt + 1}/${retries})`);
@@ -30,7 +27,9 @@ async function getGeminiEmbedding(text, apiKey, taskType = "RETRIEVAL_DOCUMENT",
         continue;
       }
 
-      const message = getGoogleErrorMessage(err, "Embedding request failed.");
+      const message = typeof err?.message === "string" && err.message.trim()
+        ? err.message.trim()
+        : "Embedding request failed.";
       throw new Error(status ? `Gemini Embedding API error (${status}): ${message}` : `Gemini Embedding API error: ${message}`);
     }
   }

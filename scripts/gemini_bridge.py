@@ -39,31 +39,65 @@ def build_config(request):
     return config
 
 
+def handle_generate(client, request):
+    response = client.models.generate_content(
+        model=request["model"],
+        contents=request["prompt"],
+        config=build_config(request),
+    )
+
+    return {
+        "ok": True,
+        "text": getattr(response, "text", "") or "",
+    }
+
+
+def handle_embed(client, request):
+    response = client.models.embed_content(
+        model=request["model"],
+        contents=request["contents"],
+        config={
+            "task_type": request.get("taskType"),
+            "output_dimensionality": request.get("outputDimensionality"),
+        },
+    )
+
+    embeddings = []
+    for item in getattr(response, "embeddings", []) or []:
+        values = getattr(item, "values", None) or []
+        embeddings.append(values)
+
+    return {
+        "ok": True,
+        "embeddings": embeddings,
+    }
+
+
 def main():
     try:
         request = read_request()
         api_key = request.get("apiKey")
-        model = request.get("model")
-        prompt = request.get("prompt")
+        action = request.get("action") or "generate_content"
 
         if not api_key:
             raise ValueError("Missing apiKey.")
-        if not model:
+        if not request.get("model"):
             raise ValueError("Missing model.")
-        if not prompt:
-            raise ValueError("Missing prompt.")
 
         client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=build_config(request),
-        )
 
-        print(json.dumps({
-            "ok": True,
-            "text": getattr(response, "text", "") or "",
-        }, ensure_ascii=False), flush=True)
+        if action == "generate_content":
+            if not request.get("prompt"):
+                raise ValueError("Missing prompt.")
+            payload = handle_generate(client, request)
+        elif action == "embed_content":
+            if request.get("contents") is None:
+                raise ValueError("Missing contents.")
+            payload = handle_embed(client, request)
+        else:
+            raise ValueError(f"Unsupported action: {action}")
+
+        print(json.dumps(payload, ensure_ascii=False), flush=True)
     except Exception as error:
         print(json.dumps({
             "ok": False,
