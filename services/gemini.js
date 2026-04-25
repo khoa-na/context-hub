@@ -1,5 +1,5 @@
 const config = require("../config");
-const { callPythonGenAI } = require("../lib/python-genai-bridge");
+const { callGoogleGenAI } = require("../lib/google-genai-client");
 
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
@@ -493,7 +493,7 @@ async function postGeminiGenerateContent({
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      return await callPythonGenAI({
+      return await callGoogleGenAI({
         apiKey,
         model,
         prompt,
@@ -513,7 +513,7 @@ async function postGeminiGenerateContent({
         continue;
       }
 
-      const error = new Error(`Python Gemini SDK error: ${err.message}`);
+      const error = new Error(`Google GenAI Node SDK error: ${err.message}`);
       error.statusCode = statusCode;
       error.cause = err;
       throw error;

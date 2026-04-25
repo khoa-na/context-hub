@@ -1,10 +1,10 @@
 const config = require("./config");
-const { callPythonGenAIEmbed } = require("./lib/python-genai-bridge");
+const { callGoogleGenAIEmbed } = require("./lib/google-genai-client");
 
 async function getGeminiEmbedding(text, apiKey, taskType = "RETRIEVAL_DOCUMENT", retries = 3) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await callPythonGenAIEmbed({
+      const response = await callGoogleGenAIEmbed({
         apiKey,
         model: config.GEMINI_EMBEDDING_MODEL,
         contents: [text],
@@ -14,7 +14,7 @@ async function getGeminiEmbedding(text, apiKey, taskType = "RETRIEVAL_DOCUMENT",
 
       const values = response?.embeddings?.[0];
       if (!values || !values.length) {
-        throw new Error("No embedding values returned from Python Google GenAI bridge.");
+        throw new Error("No embedding values returned from Google GenAI Node SDK.");
       }
 
       return values;
