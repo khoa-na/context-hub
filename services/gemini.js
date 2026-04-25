@@ -379,7 +379,7 @@ function buildDocumentsMarkdownBlock(documents) {
     .join("\n\n");
 }
 
-function buildDirectFullDocumentPrompt({ question, history, documents }) {
+function buildDirectFullDocumentPrompt({ question, history, documents, schemaInstruction }) {
   const historyLines = (history || [])
     .slice(-4)
     .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
@@ -388,6 +388,7 @@ function buildDirectFullDocumentPrompt({ question, history, documents }) {
   return [
     historyLines ? `Conversation so far:\n${historyLines}` : "",
     `=== SELECTED DOCUMENTS ===\n${buildDocumentListHeader(documents)}`,
+    schemaInstruction ? `=== EXTRACTION FOCUS ===\n${schemaInstruction}` : "",
     `=== FULL DOCUMENT MARKDOWN ===\n${buildDocumentsMarkdownBlock(documents)}`,
     `=== USER REQUEST ===\n${question}`,
   ]
@@ -395,23 +396,28 @@ function buildDirectFullDocumentPrompt({ question, history, documents }) {
     .join("\n\n");
 }
 
-function buildDocumentSlicePrompt({ question, documents, sliceText, sliceIndex, totalSlices }) {
+function buildDocumentSlicePrompt({ question, documents, sliceText, sliceIndex, totalSlices, schemaInstruction }) {
   return [
     "Selected documents:",
     buildDocumentListHeader(documents),
+    schemaInstruction ? `Extraction schema:\n${schemaInstruction}` : "",
     `Slice ${sliceIndex} of ${totalSlices}`,
     `User request: ${question}`,
     "Extract facts from this slice for later whole-document synthesis and cross-document comparison.",
-    "Focus on metrics, financial values, ratios, time periods, changes versus prior periods, risks, drivers, and notable exceptions.",
-    "Keep the output compact. Do not invent missing values.",
+    "Return a compact JSON object when possible with keys: relevant, facts, metrics, trends, risks, anomalies, missing_or_uncertain_data, sources.",
+    "If this slice is not relevant to the request, return a very short object or sentence saying it has no directly relevant information.",
+    "Keep exact numbers, units, currencies, percentages, periods, KPI names, risks, drivers, and notable exceptions.",
+    "Every fact should include the document id and section/slice source label when present.",
+    "Do not invent missing values.",
     `=== DOCUMENT SLICE ===\n${sliceText}`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
-function buildDocumentSummaryPrompt({ question, document, sliceSummaries }) {
+function buildDocumentSummaryPrompt({ question, document, sliceSummaries, schemaInstruction }) {
   return [
     "Build a compact document-level summary from the slice extractions.",
     `User request: ${question}`,
+    schemaInstruction ? `Extraction schema:\n${schemaInstruction}` : "",
     "Preserve exact numbers, units, periods, KPI names, risks, anomalies, and trend signals.",
     "Keep citations/source labels from the slice extractions.",
     "If a metric is missing or uncertain, say so briefly.",
@@ -419,13 +425,14 @@ function buildDocumentSummaryPrompt({ question, document, sliceSummaries }) {
     `=== DOCUMENT ===\n${buildDocumentListHeader([document])}`,
     "=== SLICE EXTRACTIONS ===",
     sliceSummaries.map((summary, index) => `Slice ${index + 1}:\n${summary}`).join("\n\n"),
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
-function buildWholeDocumentSummaryPrompt({ question, document }) {
+function buildWholeDocumentSummaryPrompt({ question, document, schemaInstruction }) {
   return [
     "Build a compact document-level summary from the full document markdown.",
     `User request: ${question}`,
+    schemaInstruction ? `Extraction schema:\n${schemaInstruction}` : "",
     "Preserve exact numbers, units, periods, KPI names, risks, anomalies, and trend signals.",
     "Keep source labels using the document id, title, and filename.",
     "If a metric is missing or uncertain, say so briefly.",
@@ -433,7 +440,7 @@ function buildWholeDocumentSummaryPrompt({ question, document }) {
     "",
     `=== DOCUMENT ===\n${buildDocumentListHeader([document])}`,
     `=== FULL DOCUMENT MARKDOWN ===\n${document.markdown}`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function buildDocumentReduceSystemInstruction() {
@@ -446,10 +453,11 @@ function buildDocumentReduceSystemInstruction() {
   ].join("\n");
 }
 
-function buildCompressedSummariesPrompt({ question, documents, summaries, batchIndex, totalBatches }) {
+function buildCompressedSummariesPrompt({ question, documents, summaries, batchIndex, totalBatches, schemaInstruction }) {
   return [
     "Compress these document summaries for final synthesis.",
     `User request: ${question}`,
+    schemaInstruction ? `Extraction schema:\n${schemaInstruction}` : "",
     `Batch ${batchIndex} of ${totalBatches}`,
     "Keep only information needed for answering the request and comparing selected documents.",
     "Preserve exact numbers, units, document ids, periods, and source labels.",
@@ -458,10 +466,10 @@ function buildCompressedSummariesPrompt({ question, documents, summaries, batchI
     `=== SELECTED DOCUMENTS ===\n${buildDocumentListHeader(documents)}`,
     "=== SUMMARIES TO COMPRESS ===",
     summaries.map((summary, index) => `Summary ${index + 1}:\n${summary}`).join("\n\n"),
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
-function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceSummaries, documentSummaries }) {
+function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceSummaries, documentSummaries, schemaInstruction }) {
   const historyLines = (history || [])
     .slice(-4)
     .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
@@ -471,6 +479,7 @@ function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceS
   return [
     historyLines ? `Conversation so far:\n${historyLines}` : "",
     `=== SELECTED DOCUMENTS ===\n${buildDocumentListHeader(documents)}`,
+    schemaInstruction ? `=== EXTRACTION SCHEMA ===\n${schemaInstruction}` : "",
     "=== DOCUMENT-LEVEL SUMMARIES ===",
     summaries.map((summary, index) => `Document summary ${index + 1}:\n${summary}`).join("\n\n"),
     `=== USER REQUEST ===\n${question}`,
@@ -545,13 +554,21 @@ async function generateGeminiAnswer({ apiKey, model: requestedModel, prompt, max
   return answer;
 }
 
-async function generateStructuredGeminiAnswer({ apiKey, model: requestedModel, prompt, maxOutputTokens = 700, systemInstruction = buildGeminiSystemInstruction() }) {
+async function generateStructuredGeminiAnswer({
+  apiKey,
+  model: requestedModel,
+  prompt,
+  maxOutputTokens = 700,
+  systemInstruction = buildGeminiSystemInstruction(),
+  useResponseSchema = true,
+  usePromptJsonFallback = true,
+}) {
   const model = requestedModel || process.env.GEMINI_MODEL || config.DEFAULT_MODEL || "gemma-4-31b-it";
   let payload;
   let rawText = "";
   let structured = null;
 
-  if (!shouldSkipSchemaStructuredAttempt(model)) {
+  if (useResponseSchema && !shouldSkipSchemaStructuredAttempt(model)) {
     try {
       payload = await postGeminiGenerateContent({
         apiKey,
@@ -568,7 +585,7 @@ async function generateStructuredGeminiAnswer({ apiKey, model: requestedModel, p
     } catch {}
   }
 
-  if (!structured) {
+  if (!structured && usePromptJsonFallback) {
     try {
       payload = await postGeminiGenerateContent({
         apiKey,
@@ -601,7 +618,7 @@ async function generateStructuredGeminiAnswer({ apiKey, model: requestedModel, p
     });
 
     rawText = extractGeminiText(payload);
-  const answer = normalizeModelText(rawText);
+    const answer = normalizeModelText(rawText);
 
     if (!answer) {
       const blockReason = payload?.promptFeedback?.blockReason;
