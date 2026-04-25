@@ -4,6 +4,11 @@ const { loadWikiContext, loadAllDocumentsWithMarkdown } = require("../lib/storag
 const { truncateToTokenBudget } = require("../lib/text");
 const { getDocumentSections, splitContentIntoSlices } = require("../lib/chunking");
 const {
+  buildSchemaPresetInstruction,
+  normalizeForScoring,
+  selectFullDocumentSchemaPreset,
+} = require("../lib/full-document-schemas");
+const {
   buildGeminiSystemInstruction,
   buildFullDocumentSystemInstruction,
   buildDocumentSliceSystemInstruction,
@@ -124,6 +129,141 @@ function totalSummaryLength(summaries) {
   return summaries.reduce((sum, summary) => sum + String(summary || "").length, 0);
 }
 
+function buildSliceScoringTerms(question, schemaPreset) {
+  const terms = new Set(
+    normalizeForScoring(question)
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length >= 3)
+  );
+
+  for (const value of [
+    ...(schemaPreset?.keywords || []),
+    ...(schemaPreset?.fields || []),
+    ...(schemaPreset?.focus || []),
+  ]) {
+    normalizeForScoring(value)
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length >= 3)
+      .forEach((term) => terms.add(term));
+  }
+
+  return [...terms];
+}
+
+function scoreSliceForQuestion(slice, terms) {
+  const sectionTitle = normalizeForScoring(slice.section?.title || "");
+  const text = normalizeForScoring(`${slice.section?.title || ""}\n${slice.text || ""}`);
+  if (!text || !terms.length) {
+    return 0;
+  }
+
+  return terms.reduce((score, term) => {
+    if (!text.includes(term)) {
+      return score;
+    }
+    return score + (sectionTitle.includes(term) ? 3 : 1);
+  }, 0);
+}
+
+function isBroadFullDocumentQuestion(question) {
+  const normalized = normalizeForScoring(question);
+  return [
+    "tom tat",
+    "tong quan",
+    "tinh hinh",
+    "ca nam",
+    "1 nam",
+    "mot nam",
+    "summary",
+    "overview",
+    "compare",
+    "comparison",
+    "so sanh",
+  ].some((marker) => normalized.includes(marker));
+}
+
+function addEvenlySpacedSlices(selected, scoredSlices, targetCount) {
+  if (!scoredSlices.length || targetCount <= 0) {
+    return;
+  }
+
+  if (targetCount === 1) {
+    selected.set(scoredSlices[0].index, scoredSlices[0]);
+    return;
+  }
+
+  for (let position = 0; position < targetCount; position += 1) {
+    const index = Math.round((position * (scoredSlices.length - 1)) / (targetCount - 1));
+    selected.set(scoredSlices[index].index, scoredSlices[index]);
+  }
+}
+
+function selectRelevantDocumentSlices({ slices, question, schemaPreset, maxSlices }) {
+  if (!Number.isFinite(maxSlices) || maxSlices <= 0 || slices.length <= maxSlices) {
+    return slices;
+  }
+
+  const terms = buildSliceScoringTerms(question, schemaPreset);
+  const scoredSlices = slices.map((slice, index) => ({
+    slice,
+    index,
+    score: scoreSliceForQuestion(slice, terms),
+  }));
+  const selected = new Map();
+  selected.set(0, scoredSlices[0]);
+
+  if (isBroadFullDocumentQuestion(question)) {
+    addEvenlySpacedSlices(selected, scoredSlices, Math.ceil(maxSlices / 2));
+  }
+
+  for (const item of [...scoredSlices].sort((a, b) => b.score - a.score || a.index - b.index)) {
+    if (selected.size >= maxSlices) {
+      break;
+    }
+    selected.set(item.index, item);
+  }
+
+  return [...selected.values()]
+    .sort((a, b) => a.index - b.index)
+    .map((item) => item.slice);
+}
+
+function buildFallbackFollowUpQuestions(schemaPreset) {
+  if (schemaPreset?.id === "financial") {
+    return [
+      "Bạn muốn tách riêng doanh thu, lợi nhuận và dòng tiền theo từng báo cáo không?",
+      "Bạn muốn xem các nguyên nhân chính làm kết quả tăng hoặc giảm không?",
+    ];
+  }
+
+  if (schemaPreset?.id === "operational") {
+    return [
+      "Bạn muốn so sánh riêng các KPI vận hành theo từng kỳ không?",
+      "Bạn muốn xem các điểm nghẽn vận hành quan trọng nhất không?",
+    ];
+  }
+
+  if (schemaPreset?.id === "risk") {
+    return [
+      "Bạn muốn nhóm các rủi ro theo mức độ ảnh hưởng không?",
+      "Bạn muốn xem rủi ro nào lặp lại qua nhiều báo cáo không?",
+    ];
+  }
+
+  return [
+    "Bạn muốn đào sâu phần chỉ số, rủi ro hay xu hướng theo từng báo cáo?",
+    "Bạn muốn so sánh các điểm khác biệt chính giữa các tài liệu không?",
+  ];
+}
+
+function buildFallbackStructuredAnswer({ answer, documents, schemaPreset }) {
+  return {
+    answer,
+    citations: documents.map((document) => document.id),
+    follow_up_questions: buildFallbackFollowUpQuestions(schemaPreset),
+  };
+}
+
 async function mapWithConcurrency(items, concurrency, mapper) {
   const limit = Math.max(1, Number(concurrency) || 1);
   const results = new Array(items.length);
@@ -142,8 +282,14 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   return results;
 }
 
-async function summarizeLongDocumentWithSlices({ document, question, apiKey, model, modelConcurrency }) {
-  const slices = buildDocumentSlices([document]);
+async function summarizeLongDocumentWithSlices({ document, question, apiKey, model, modelConcurrency, schemaPreset, schemaInstruction }) {
+  const allSlices = buildDocumentSlices([document]);
+  const slices = selectRelevantDocumentSlices({
+    slices: allSlices,
+    question,
+    schemaPreset,
+    maxSlices: config.FULL_DOCUMENT_MAX_SLICES_PER_DOC || 10,
+  });
   const sliceSummaries = await mapWithConcurrency(slices, modelConcurrency, async (slice, index) => {
     return generateGeminiAnswer({
       apiKey,
@@ -156,6 +302,7 @@ async function summarizeLongDocumentWithSlices({ document, question, apiKey, mod
         sliceText: slice.text,
         sliceIndex: index + 1,
         totalSlices: slices.length,
+        schemaInstruction,
       }),
     });
   });
@@ -169,16 +316,27 @@ async function summarizeLongDocumentWithSlices({ document, question, apiKey, mod
       question,
       document,
       sliceSummaries,
+      schemaInstruction,
     }),
   });
 
   return {
     summary,
     sliceCount: slices.length,
+    totalSliceCount: allSlices.length,
   };
 }
 
-async function summarizeDocumentForFullDocumentMode({ document, question, apiKey, model, directCharBudget, modelConcurrency }) {
+async function summarizeDocumentForFullDocumentMode({
+  document,
+  question,
+  apiKey,
+  model,
+  directCharBudget,
+  modelConcurrency,
+  schemaPreset,
+  schemaInstruction,
+}) {
   if (document.markdown.length <= directCharBudget) {
     const summary = await generateGeminiAnswer({
       apiKey,
@@ -188,12 +346,14 @@ async function summarizeDocumentForFullDocumentMode({ document, question, apiKey
       prompt: buildWholeDocumentSummaryPrompt({
         question,
         document,
+        schemaInstruction,
       }),
     });
 
     return {
       summary,
       sliceCount: 1,
+      totalSliceCount: 1,
     };
   }
 
@@ -203,6 +363,8 @@ async function summarizeDocumentForFullDocumentMode({ document, question, apiKey
     apiKey,
     model,
     modelConcurrency,
+    schemaPreset,
+    schemaInstruction,
   });
 }
 
@@ -256,26 +418,39 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
   }
 
   const directCharBudget = config.FULL_DOCUMENT_DIRECT_CHAR_BUDGET || 18000;
+  const multiDirectCharBudget = config.FULL_DOCUMENT_MULTI_DIRECT_CHAR_BUDGET || directCharBudget;
   const synthesisCharBudget = config.FULL_DOCUMENT_SYNTHESIS_CHAR_BUDGET || 22000;
   const modelConcurrency = config.FULL_DOCUMENT_MODEL_CONCURRENCY || 3;
+  const schemaPreset = selectFullDocumentSchemaPreset(question);
+  const schemaInstruction = buildSchemaPresetInstruction(schemaPreset);
   const combinedMarkdownLength = selectedDocuments.reduce((sum, doc) => sum + doc.markdown.length, 0);
   let answer;
   let structured = null;
   let rawModelText = "";
   let sliceCount = 1;
+  let totalSliceCount = 1;
   let processingMode = "direct";
   let compressionPasses = 0;
+  const canUseDirectFullDocuments = selectedDocuments.length === 1
+    ? combinedMarkdownLength <= directCharBudget
+    : combinedMarkdownLength <= multiDirectCharBudget;
 
-  if (selectedDocuments.length === 1 && combinedMarkdownLength <= directCharBudget) {
+  if (canUseDirectFullDocuments) {
     const response = await generateStructuredGeminiAnswer({
       apiKey,
       model,
       maxOutputTokens: 900,
       systemInstruction: buildFullDocumentSystemInstruction(),
-      prompt: buildDirectFullDocumentPrompt({ question, history, documents: selectedDocuments }),
+      prompt: buildDirectFullDocumentPrompt({
+        question,
+        history,
+        documents: selectedDocuments,
+        schemaInstruction,
+      }),
+      useResponseSchema: false,
     });
     answer = response.answer;
-    structured = response.structured;
+    structured = response.structured || buildFallbackStructuredAnswer({ answer, documents: selectedDocuments, schemaPreset });
     rawModelText = response.rawText || "";
   } else {
     processingMode = "staged";
@@ -288,9 +463,12 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
         model,
         directCharBudget,
         modelConcurrency: sliceConcurrency,
+        schemaPreset,
+        schemaInstruction,
       });
     });
     sliceCount = documentResults.reduce((sum, result) => sum + result.sliceCount, 0);
+    totalSliceCount = documentResults.reduce((sum, result) => sum + (result.totalSliceCount || result.sliceCount), 0);
     let documentSummaries = documentResults.map((result) => result.summary);
 
     while (totalSummaryLength(documentSummaries) > synthesisCharBudget && compressionPasses < 4) {
@@ -307,6 +485,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
             summaries: [batch],
             batchIndex: index + 1,
             totalBatches: batches.length,
+            schemaInstruction,
           }),
         });
       });
@@ -329,10 +508,12 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
         history,
         documents: selectedDocuments,
         documentSummaries,
+        schemaInstruction,
       }),
+      useResponseSchema: false,
     });
     answer = response.answer;
-    structured = response.structured;
+    structured = response.structured || buildFallbackStructuredAnswer({ answer, documents: selectedDocuments, schemaPreset });
     rawModelText = response.rawText || "";
   }
 
@@ -354,9 +535,11 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
       filename: document.filename,
     })),
     sliceCount,
+    totalSliceCount,
     processingMode,
     documentCount: selectedDocuments.length,
     compressionPasses,
+    schemaPreset: schemaPreset.id,
   };
 }
 
