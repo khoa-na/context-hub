@@ -61,6 +61,7 @@ async function serveStatic(_req, res, pathname) {
 
 function sendModelOptions(_req, res) {
   return sendJson(res, 200, {
+    providers: config.PROVIDERS,
     models: config.MODELS,
     defaultModel: config.DEFAULT_MODEL,
   });

@@ -5,6 +5,7 @@ const config = require("../config");
 const { ROOT, DOCS_DIR } = require("../constants");
 const { getDocChunkCounts, removeDocumentChunks, createIndexes } = require("../db");
 const { sendJson, parseJson } = require("../lib/http");
+const { getApiKeyForProvider } = require("../lib/model-providers");
 const { ensureSession, rotateSession, writeSession } = require("../lib/session");
 const { parseMultipartFile } = require("../lib/uploads");
 const { convertToMarkdown, convertUploadToMarkdown, slugify, repairTextEncoding } = require("../lib/markdown");
@@ -210,6 +211,7 @@ async function handleChat(req, res) {
   const session = await ensureSession(req, res);
   const question = String(body.question || "").trim();
   const apiKey = String(body.apiKey || "").trim();
+  const apiKeys = body.apiKeys && typeof body.apiKeys === "object" ? body.apiKeys : {};
   const model = String(body.model || "").trim();
   const chatMode = normalizeChatMode(String(body.chatMode || "qa").trim().toLowerCase());
   const documentId = String(body.documentId || "").trim();
@@ -221,8 +223,8 @@ async function handleChat(req, res) {
   }
 
   const result = chatMode === "full-document"
-    ? await answerWithFullDocument({ question, history: session.history, apiKey, model, documentId, documentIds })
-    : await callGemini({ question, history: session.history, apiKey, model, tenantId: "default", retrievalMode });
+    ? await answerWithFullDocument({ question, history: session.history, apiKey, apiKeys, model, documentId, documentIds })
+    : await callGemini({ question, history: session.history, apiKey, apiKeys, model, tenantId: "default", retrievalMode });
 
   session.history.push(
     { role: "user", content: question },
@@ -252,7 +254,12 @@ async function handleChat(req, res) {
 async function handleSearch(req, res) {
   const body = await parseJson(req);
   const question = String(body.question || body.query || "").trim();
-  const apiKey = String(body.apiKey || "").trim() || process.env.GEMINI_API_KEY || "";
+  const apiKeys = body.apiKeys && typeof body.apiKeys === "object" ? body.apiKeys : {};
+  const apiKey = getApiKeyForProvider({
+    provider: "google",
+    apiKeys,
+    legacyApiKey: String(body.apiKey || "").trim(),
+  });
   const retrievalMode = normalizeRetrievalMode(String(body.retrievalMode || "hybrid").trim().toLowerCase());
   const topK = Math.min(Math.max(Number(body.topK) || 5, 1), 20);
 
@@ -296,7 +303,12 @@ async function handleSessionReset(req, res) {
 
 async function handleReindex(req, res) {
   const body = await parseJson(req);
-  const apiKey = String(body.apiKey || "").trim() || process.env.GEMINI_API_KEY;
+  const apiKeys = body.apiKeys && typeof body.apiKeys === "object" ? body.apiKeys : {};
+  const apiKey = getApiKeyForProvider({
+    provider: "google",
+    apiKeys,
+    legacyApiKey: String(body.apiKey || "").trim(),
+  });
   if (!apiKey) {
     return sendJson(res, 400, { error: "API key required for reindexing." });
   }
@@ -366,11 +378,17 @@ async function handleWikiList(_req, res) {
 async function handleSaveKey(req, res) {
   const body = await parseJson(req);
   const key = String(body.apiKey || "").trim();
+  const provider = String(body.provider || "google").trim();
+  const providerConfig = (config.PROVIDERS || []).find((item) => item.id === provider);
   if (!key) {
     return sendJson(res, 400, { error: "apiKey is required." });
   }
-  await saveEnvValue("GEMINI_API_KEY", key);
-  return sendJson(res, 200, { saved: true });
+  if (!providerConfig) {
+    return sendJson(res, 400, { error: "Unsupported provider." });
+  }
+
+  await saveEnvValue(providerConfig.apiKeyEnv, key);
+  return sendJson(res, 200, { saved: true, provider });
 }
 
 module.exports = {

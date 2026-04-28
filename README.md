@@ -15,9 +15,9 @@ This branch includes:
 - Parent-child retrieval: search on child chunks, answer with parent section context
 - Gemini-generated chunk titles for better contextual embeddings
 - Full-document mode for up to 5 selected documents at a time
-- Chat model selector with 2 Gemma 4 options: `gemma-4-31b-it` and `gemma-4-26b-a4b-it`
+- Chat model selector with Gemini and DashScope/Qwen options
 - Retrieval-only debug mode via `/api/search`
-- Save Gemini API keys from the UI into `.env`
+- Save Gemini and DashScope API keys from the UI into `.env`
 - LAN-friendly startup logging when the server is bound outside localhost
 
 ## Core Flows
@@ -111,6 +111,7 @@ data/sessions/             Session history JSON files
 
 ```env
 GEMINI_API_KEY=your_gemini_key
+DASHSCOPE_API_KEY=your_dashscope_key
 GEMINI_MODEL=gemma-4-31b-it
 PORT=3000
 HOST=0.0.0.0
@@ -158,7 +159,7 @@ If `HOST=0.0.0.0`, startup logs will also print LAN URLs such as `http://192.168
 | `/api/wiki-list` | GET | List wiki files |
 | `/api/reindex` | POST | Re-index all documents |
 | `/api/models` | GET | Return the configured chat-model options |
-| `/api/save-key` | POST | Save `GEMINI_API_KEY` into `.env` |
+| `/api/save-key` | POST | Save provider API keys into `.env` |
 | `/api/session/reset` | POST | Start a fresh local chat session |
 
 ## Example Request Shapes
@@ -169,6 +170,10 @@ If `HOST=0.0.0.0`, startup logs will also print LAN URLs such as `http://192.168
 {
   "question": "Tom tat cac rui ro chinh",
   "apiKey": "your-gemini-key",
+  "apiKeys": {
+    "google": "your-gemini-key",
+    "dashscope": "your-dashscope-key"
+  },
   "chatMode": "full-document",
   "documentIds": ["doc-a", "doc-b"],
   "retrievalMode": "hybrid"
@@ -180,6 +185,8 @@ If `HOST=0.0.0.0`, startup logs will also print LAN URLs such as `http://192.168
 | Variable | Default | Description |
 |---|---|---|
 | `GEMINI_API_KEY` | — | Required for semantic retrieval, indexing, and chat generation |
+| `DASHSCOPE_API_KEY` | — | Required for DashScope/Qwen chat generation |
+| `DASHSCOPE_BASE_URL` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | Optional DashScope OpenAI-compatible base URL override |
 | `GEMINI_MODEL` | `gemma-4-31b-it` | Default answer-generation model used by `services/gemini.js` |
 | `PORT` | `3000` | Server port |
 | `HOST` | `0.0.0.0` | Bind address. Use `127.0.0.1` for local-only access |
