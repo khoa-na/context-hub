@@ -1,5 +1,7 @@
 const config = require("../config");
 const { callGoogleGenAI } = require("../lib/google-genai-client");
+const { callDashScopeChatCompletion } = require("../lib/dashscope-client");
+const { getDefaultModelForProvider, getProviderForModel } = require("../lib/model-providers");
 
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
@@ -28,8 +30,8 @@ function isRetryableModelError(err) {
   return statusCode ? RETRYABLE_STATUS_CODES.has(statusCode) : false;
 }
 
-function shouldSkipSchemaStructuredAttempt(model) {
-  return model === "gemma-4-26b-a4b-it";
+function shouldSkipSchemaStructuredAttempt(model, provider = "google") {
+  return provider !== "google" || model === "gemma-4-26b-a4b-it";
 }
 
 function extractGeminiText(payload) {
@@ -530,9 +532,52 @@ async function postGeminiGenerateContent({
   }
 }
 
-async function generateGeminiAnswer({ apiKey, model: requestedModel, prompt, maxOutputTokens = 700, systemInstruction = buildGeminiSystemInstruction() }) {
-  const model = requestedModel || process.env.GEMINI_MODEL || config.DEFAULT_MODEL || "gemma-4-31b-it";
-  const payload = await postGeminiGenerateContent({
+function resolveGenerationTarget({ model: requestedModel, provider: requestedProvider }) {
+  const provider = requestedProvider || getProviderForModel(requestedModel);
+  const model = requestedModel
+    || (provider === "google" ? process.env.GEMINI_MODEL : "")
+    || getDefaultModelForProvider(provider)
+    || config.DEFAULT_MODEL
+    || "gemma-4-31b-it";
+
+  return { model, provider };
+}
+
+async function postModelGenerateContent({
+  provider = "google",
+  apiKey,
+  model,
+  prompt,
+  maxOutputTokens,
+  systemInstruction,
+  responseMimeType,
+  responseJsonSchema,
+}) {
+  if (provider === "dashscope") {
+    return callDashScopeChatCompletion({
+      apiKey,
+      model,
+      prompt,
+      maxOutputTokens,
+      systemInstruction: systemInstruction || buildGeminiSystemInstruction(),
+    });
+  }
+
+  return postGeminiGenerateContent({
+    apiKey,
+    model,
+    prompt,
+    maxOutputTokens,
+    systemInstruction,
+    responseMimeType,
+    responseJsonSchema,
+  });
+}
+
+async function generateGeminiAnswer({ apiKey, provider: requestedProvider, model: requestedModel, prompt, maxOutputTokens = 700, systemInstruction = buildGeminiSystemInstruction() }) {
+  const { model, provider } = resolveGenerationTarget({ model: requestedModel, provider: requestedProvider });
+  const payload = await postModelGenerateContent({
+    provider,
     apiKey,
     model,
     prompt,
@@ -545,10 +590,10 @@ async function generateGeminiAnswer({ apiKey, model: requestedModel, prompt, max
   if (!answer) {
     const blockReason = payload?.promptFeedback?.blockReason;
     if (blockReason) {
-      throw new Error(`Gemini blocked this request: ${blockReason}`);
+      throw new Error(`${provider} blocked this request: ${blockReason}`);
     }
 
-    throw new Error("Gemini returned an empty answer for this request.");
+    throw new Error(`${provider} returned an empty answer for this request.`);
   }
 
   return answer;
@@ -556,6 +601,7 @@ async function generateGeminiAnswer({ apiKey, model: requestedModel, prompt, max
 
 async function generateStructuredGeminiAnswer({
   apiKey,
+  provider: requestedProvider,
   model: requestedModel,
   prompt,
   maxOutputTokens = 700,
@@ -563,14 +609,15 @@ async function generateStructuredGeminiAnswer({
   useResponseSchema = true,
   usePromptJsonFallback = true,
 }) {
-  const model = requestedModel || process.env.GEMINI_MODEL || config.DEFAULT_MODEL || "gemma-4-31b-it";
+  const { model, provider } = resolveGenerationTarget({ model: requestedModel, provider: requestedProvider });
   let payload;
   let rawText = "";
   let structured = null;
 
-  if (useResponseSchema && !shouldSkipSchemaStructuredAttempt(model)) {
+  if (useResponseSchema && !shouldSkipSchemaStructuredAttempt(model, provider)) {
     try {
-      payload = await postGeminiGenerateContent({
+      payload = await postModelGenerateContent({
+        provider,
         apiKey,
         model,
         prompt,
@@ -587,7 +634,8 @@ async function generateStructuredGeminiAnswer({
 
   if (!structured && usePromptJsonFallback) {
     try {
-      payload = await postGeminiGenerateContent({
+      payload = await postModelGenerateContent({
+        provider,
         apiKey,
         model,
         prompt: buildStructuredAnswerPrompt(prompt),
@@ -609,7 +657,8 @@ async function generateStructuredGeminiAnswer({
   }
 
   try {
-    payload = await postGeminiGenerateContent({
+    payload = await postModelGenerateContent({
+      provider,
       apiKey,
       model,
       prompt,
@@ -623,10 +672,10 @@ async function generateStructuredGeminiAnswer({
     if (!answer) {
       const blockReason = payload?.promptFeedback?.blockReason;
       if (blockReason) {
-        throw new Error(`Gemini blocked this request: ${blockReason}`);
+        throw new Error(`${provider} blocked this request: ${blockReason}`);
       }
 
-      throw new Error("Gemini returned an empty answer for this request.");
+      throw new Error(`${provider} returned an empty answer for this request.`);
     }
 
     return {
@@ -756,6 +805,7 @@ module.exports = {
   generateStructuredGeminiAnswer,
   generateChunkTitles,
   postGeminiGenerateContent,
+  postModelGenerateContent,
   extractGeminiText,
   sanitizeModelAnswer,
   normalizeModelText,

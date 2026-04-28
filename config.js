@@ -16,9 +16,15 @@ module.exports = {
   EMBEDDING_DIMENSION: 768,
   EMBEDDING_BATCH_SIZE: 10,
   EMBEDDING_BATCH_DELAY_MS: 2000,
+  PROVIDERS: [
+    { id: "google", name: "Gemini", apiKeyEnv: "GEMINI_API_KEY" },
+    { id: "dashscope", name: "DashScope", apiKeyEnv: "DASHSCOPE_API_KEY" },
+  ],
   MODELS: [
     { id: "gemma-4-31b-it", name: "Gemma 4 31B IT", provider: "google" },
     { id: "gemma-4-26b-a4b-it", name: "Gemma 4 26B A4B IT", provider: "google" },
+    { id: "qwen3.6-35b-a3b", name: "Qwen3.6 35B A3B", provider: "dashscope" },
+    { id: "qwen3.6-27b", name: "Qwen3.6 27B", provider: "dashscope" },
   ],
   DEFAULT_MODEL: "gemma-4-31b-it",
 };

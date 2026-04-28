@@ -36,6 +36,14 @@
           </div>
           <p id="key-status" class="status-line"></p>
         </div>
+        <div class="settings-group">
+          <label class="field-label" for="dashscope-api-key-input">DashScope API key</label>
+          <div class="inline-field">
+            <input id="dashscope-api-key-input" type="password" placeholder="Paste your DashScope key for Qwen models" autocomplete="off" spellcheck="false" />
+            <button id="save-dashscope-key-button" class="btn-accent" type="button">Save to .env</button>
+          </div>
+          <p id="dashscope-key-status" class="status-line"></p>
+        </div>
         <label class="checkbox-row">
           <input id="show-key-toggle" type="checkbox" />
           <span>Show keys</span>

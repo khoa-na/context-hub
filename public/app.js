@@ -1,6 +1,7 @@
 const state = {
   documents: [],
   history: [],
+  providers: [],
   models: [],
   selectedModel: "",
   selectedDocIds: new Set(),
@@ -13,8 +14,11 @@ const uploadStatus = document.querySelector("#upload-status");
 const documentList = document.querySelector("#document-list");
 const apiKeyInput = document.querySelector("#api-key-input");
 const saveKeyButton = document.querySelector("#save-key-button");
+const dashscopeApiKeyInput = document.querySelector("#dashscope-api-key-input");
+const saveDashscopeKeyButton = document.querySelector("#save-dashscope-key-button");
 const showKeyToggle = document.querySelector("#show-key-toggle");
 const keyStatus = document.querySelector("#key-status");
+const dashscopeKeyStatus = document.querySelector("#dashscope-key-status");
 const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
 const chatModeSelect = document.querySelector("#chat-mode");
@@ -38,7 +42,10 @@ const wikiUploadButton = document.querySelector("#wiki-upload-button");
 const wikiUploadStatus = document.querySelector("#wiki-upload-status");
 const wikiList = document.querySelector("#wiki-list");
 
-let sessionApiKey = "";
+const sessionApiKeys = {
+  google: "",
+  dashscope: "",
+};
 const FULL_DOCUMENT_MAX_SELECTED_DOCS = 5;
 
 const dropzone = fileInput.closest(".dropzone");
@@ -193,10 +200,27 @@ function renderModelOptions() {
   }
 
   modelSelect.disabled = false;
-  modelSelect.innerHTML = state.models
-    .map((model) => {
-      const selected = model.id === state.selectedModel ? "selected" : "";
-      return `<option value="${escapeHtml(model.id)}" ${selected}>${escapeHtml(model.name)}</option>`;
+  const providerNames = new Map(state.providers.map((provider) => [provider.id, provider.name]));
+  const grouped = state.models.reduce((groups, model) => {
+    const provider = model.provider || "google";
+    if (!groups.has(provider)) {
+      groups.set(provider, []);
+    }
+    groups.get(provider).push(model);
+    return groups;
+  }, new Map());
+
+  modelSelect.innerHTML = Array.from(grouped.entries())
+    .map(([provider, models]) => {
+      const label = providerNames.get(provider) || provider;
+      const options = models
+        .map((model) => {
+          const selected = model.id === state.selectedModel ? "selected" : "";
+          const badge = model.badge ? ` · ${model.badge}` : "";
+          return `<option value="${escapeHtml(model.id)}" ${selected}>${escapeHtml(model.name)}${escapeHtml(badge)}</option>`;
+        })
+        .join("");
+      return `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
     })
     .join("");
 }
@@ -375,11 +399,18 @@ function resetConversation(resetServer = false) {
   }
 }
 
-async function saveApiKey() {
-  const value = apiKeyInput.value.trim();
+function getApiKeys() {
+  return {
+    google: apiKeyInput.value.trim() || sessionApiKeys.google,
+    dashscope: dashscopeApiKeyInput.value.trim() || sessionApiKeys.dashscope,
+  };
+}
+
+async function saveApiKey(provider, input, statusEl) {
+  const value = input.value.trim();
   if (!value) {
-    sessionApiKey = "";
-    keyStatus.textContent = "Key cleared.";
+    sessionApiKeys[provider] = "";
+    statusEl.textContent = "Key cleared.";
     return "";
   }
 
@@ -387,25 +418,28 @@ async function saveApiKey() {
     const response = await fetch("/api/save-key", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey: value }),
+      body: JSON.stringify({ provider, apiKey: value }),
     });
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(payload.error || "Failed to save key.");
     }
-    sessionApiKey = value;
-    keyStatus.textContent = "Key saved to .env. It will persist across restarts.";
+    sessionApiKeys[provider] = value;
+    statusEl.textContent = "Key saved to .env. It will persist across restarts.";
   } catch (err) {
-    sessionApiKey = value;
-    keyStatus.textContent = "Saved for this session only. Server error: " + err.message;
+    sessionApiKeys[provider] = value;
+    statusEl.textContent = "Saved for this session only. Server error: " + err.message;
   }
-  return sessionApiKey;
+  return sessionApiKeys[provider];
 }
 
 function hydrateApiKey() {
-  sessionApiKey = "";
+  sessionApiKeys.google = "";
+  sessionApiKeys.dashscope = "";
   apiKeyInput.value = "";
+  dashscopeApiKeyInput.value = "";
   keyStatus.textContent = "No session key. Enter your Gemini API key above.";
+  dashscopeKeyStatus.textContent = "No session key. Enter your DashScope API key above.";
 }
 
 async function loadDocuments() {
@@ -447,7 +481,7 @@ uploadButton.addEventListener("click", async () => {
   uploadStatus.textContent = files.length === 1 ? "Converting and indexing..." : `Uploading and indexing ${files.length} files...`;
 
   try {
-    const apiKey = apiKeyInput.value.trim() || sessionApiKey;
+    const apiKey = getApiKeys().google;
     const results = [];
 
     for (let index = 0; index < files.length; index += 1) {
@@ -508,20 +542,21 @@ fileInput.addEventListener("change", () => {
 });
 
 saveKeyButton.addEventListener("click", () => {
-  saveApiKey();
+  saveApiKey("google", apiKeyInput, keyStatus);
+});
+
+saveDashscopeKeyButton.addEventListener("click", () => {
+  saveApiKey("dashscope", dashscopeApiKeyInput, dashscopeKeyStatus);
 });
 
 showKeyToggle.addEventListener("change", () => {
-  apiKeyInput.type = showKeyToggle.checked ? "text" : "password";
+  const inputType = showKeyToggle.checked ? "text" : "password";
+  apiKeyInput.type = inputType;
+  dashscopeApiKeyInput.type = inputType;
 });
 
 modelSelect.addEventListener("change", () => {
   state.selectedModel = modelSelect.value;
-});
-
-chatModeSelect.addEventListener("change", () => {
-  updateChatModeUI();
-  resetConversation(true);
 });
 
 chatModeSelect.addEventListener("change", () => {
@@ -640,7 +675,7 @@ chatForm.addEventListener("submit", async (event) => {
   chatInput.style.height = "auto";
 
   try {
-    const apiKey = apiKeyInput.value.trim() || sessionApiKey;
+    const apiKeys = getApiKeys();
 
     const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
 
@@ -652,7 +687,8 @@ chatForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({
         question,
         history: state.history,
-        apiKey,
+        apiKey: apiKeys.google,
+        apiKeys,
         model: state.selectedModel,
         chatMode,
         documentId: chatMode === "full-document" ? (selectedDocumentIds[0] || "") : "",
@@ -702,6 +738,7 @@ async function loadModels() {
   try {
     const response = await fetch("/api/models");
     const payload = await response.json();
+    state.providers = payload.providers || [];
     state.models = payload.models || [];
     state.selectedModel = payload.defaultModel || state.models[0]?.id || "";
     renderModelOptions();

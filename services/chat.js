@@ -1,5 +1,6 @@
 const config = require("../config");
 const { semanticSearch, bm25Search, hybridSearch } = require("../db");
+const { getApiKeyForProvider, getProviderForModel } = require("../lib/model-providers");
 const { loadWikiContext, loadAllDocumentsWithMarkdown } = require("../lib/storage");
 const { truncateToTokenBudget } = require("../lib/text");
 const { getDocumentSections, splitContentIntoSlices } = require("../lib/chunking");
@@ -282,7 +283,7 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   return results;
 }
 
-async function summarizeLongDocumentWithSlices({ document, question, apiKey, model, modelConcurrency, schemaPreset, schemaInstruction }) {
+async function summarizeLongDocumentWithSlices({ document, question, apiKey, provider, model, modelConcurrency, schemaPreset, schemaInstruction }) {
   const allSlices = buildDocumentSlices([document]);
   const slices = selectRelevantDocumentSlices({
     slices: allSlices,
@@ -293,6 +294,7 @@ async function summarizeLongDocumentWithSlices({ document, question, apiKey, mod
   const sliceSummaries = await mapWithConcurrency(slices, modelConcurrency, async (slice, index) => {
     return generateGeminiAnswer({
       apiKey,
+      provider,
       model,
       maxOutputTokens: 500,
       systemInstruction: buildDocumentSliceSystemInstruction(),
@@ -309,6 +311,7 @@ async function summarizeLongDocumentWithSlices({ document, question, apiKey, mod
 
   const summary = await generateGeminiAnswer({
     apiKey,
+    provider,
     model,
     maxOutputTokens: 700,
     systemInstruction: buildDocumentReduceSystemInstruction(),
@@ -331,6 +334,7 @@ async function summarizeDocumentForFullDocumentMode({
   document,
   question,
   apiKey,
+  provider,
   model,
   directCharBudget,
   modelConcurrency,
@@ -340,6 +344,7 @@ async function summarizeDocumentForFullDocumentMode({
   if (document.markdown.length <= directCharBudget) {
     const summary = await generateGeminiAnswer({
       apiKey,
+      provider,
       model,
       maxOutputTokens: 900,
       systemInstruction: buildDocumentReduceSystemInstruction(),
@@ -361,6 +366,7 @@ async function summarizeDocumentForFullDocumentMode({
     document,
     question,
     apiKey,
+    provider,
     model,
     modelConcurrency,
     schemaPreset,
@@ -392,10 +398,11 @@ function serializeChunk(chunk) {
   };
 }
 
-async function answerWithFullDocument({ question, history, apiKey: requestApiKey, model, documentId, documentIds = [] }) {
-  const apiKey = requestApiKey || process.env.GEMINI_API_KEY;
+async function answerWithFullDocument({ question, history, apiKey: legacyApiKey, apiKeys = {}, model, documentId, documentIds = [] }) {
+  const provider = getProviderForModel(model);
+  const apiKey = getApiKeyForProvider({ provider, apiKeys, legacyApiKey });
   if (!apiKey) {
-    throw new Error("Missing Gemini API key. Add GEMINI_API_KEY to the environment or paste a key into the app.");
+    throw new Error(`Missing ${provider} API key. Add it to the environment or paste a key into the app.`);
   }
 
   const selectedDocumentIds = normalizeDocumentSelection(documentIds, documentId);
@@ -438,6 +445,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
   if (canUseDirectFullDocuments) {
     const response = await generateStructuredGeminiAnswer({
       apiKey,
+      provider,
       model,
       maxOutputTokens: 900,
       systemInstruction: buildFullDocumentSystemInstruction(),
@@ -460,6 +468,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
         document,
         question,
         apiKey,
+        provider,
         model,
         directCharBudget,
         modelConcurrency: sliceConcurrency,
@@ -476,6 +485,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
       const compressed = await mapWithConcurrency(batches, modelConcurrency, async (batch, index) => {
         return generateGeminiAnswer({
           apiKey,
+          provider,
           model,
           maxOutputTokens: 700,
           systemInstruction: buildDocumentReduceSystemInstruction(),
@@ -500,6 +510,7 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
 
     const response = await generateStructuredGeminiAnswer({
       apiKey,
+      provider,
       model,
       maxOutputTokens: 900,
       systemInstruction: buildFullDocumentSystemInstruction(),
@@ -543,26 +554,31 @@ async function answerWithFullDocument({ question, history, apiKey: requestApiKey
   };
 }
 
-async function callGemini({ question, history, apiKey: requestApiKey, model, tenantId = "default", retrievalMode = "hybrid" }) {
-  const apiKey = requestApiKey || process.env.GEMINI_API_KEY;
+async function callGemini({ question, history, apiKey: legacyApiKey, apiKeys = {}, model, tenantId = "default", retrievalMode = "hybrid" }) {
+  const provider = getProviderForModel(model);
+  const apiKey = getApiKeyForProvider({ provider, apiKeys, legacyApiKey });
+  const embeddingApiKey = getApiKeyForProvider({ provider: "google", apiKeys, legacyApiKey });
   if (!apiKey) {
-    throw new Error("Missing Gemini API key. Add GEMINI_API_KEY to the environment or paste a key into the app.");
+    throw new Error(`Missing ${provider} API key. Add it to the environment or paste a key into the app.`);
   }
 
   const wikiContext = await loadWikiContext(tenantId);
   const selectedRetrievalMode = normalizeRetrievalMode(retrievalMode);
+  const searchRetrievalMode = retrievalUsesEmbedding(selectedRetrievalMode) && !embeddingApiKey
+    ? "bm25"
+    : selectedRetrievalMode;
 
   let ragChunks = [];
   try {
     ragChunks = await retrieveRelevantChunks({
       question,
       tenantId,
-      apiKey,
-      retrievalMode: selectedRetrievalMode,
+      apiKey: embeddingApiKey,
+      retrievalMode: searchRetrievalMode,
       topK: 5,
     });
   } catch (err) {
-    console.error(`${selectedRetrievalMode} search failed, falling back to full context:`, err.message);
+    console.error(`${searchRetrievalMode} search failed, falling back to full context:`, err.message);
   }
 
   let ragContext = "";
@@ -584,6 +600,7 @@ async function callGemini({ question, history, apiKey: requestApiKey, model, ten
 
   const response = await generateStructuredGeminiAnswer({
     apiKey,
+    provider,
     model,
     maxOutputTokens: 700,
     systemInstruction: buildGeminiSystemInstruction(),
@@ -595,7 +612,7 @@ async function callGemini({ question, history, apiKey: requestApiKey, model, ten
     structured: response.structured,
     rawModelText: response.rawText || "",
     chunks: ragChunks,
-    retrievalMode: selectedRetrievalMode,
+    retrievalMode: searchRetrievalMode,
   };
 }
 

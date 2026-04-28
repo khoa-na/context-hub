@@ -12,6 +12,7 @@
     "@lancedb/lancedb": "^0.27.2",
     "busboy": "^1.6.0",
     "dotenv": "^17.4.2",
-    "mammoth": "^1.12.0"
+    "mammoth": "^1.12.0",
+    "openai": "^6.34.0"
   }
 }
