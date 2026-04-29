@@ -16,7 +16,6 @@ This branch includes:
 - Gemini-generated chunk titles for better contextual embeddings
 - Full-document mode for up to 5 selected documents at a time
 - Chat model selector with Gemini and DashScope/Qwen options
-- Paste one or more public web page URLs, render them with Chromium, then ask about selected pages in Web pages mode with fast, automatic, or full-scan reading
 - Retrieval-only debug mode via `/api/search`
 - Save Gemini and DashScope API keys from the UI into `.env`
 - LAN-friendly startup logging when the server is bound outside localhost
@@ -152,8 +151,6 @@ If `HOST=0.0.0.0`, startup logs will also print LAN URLs such as `http://192.168
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/upload` | POST | Upload a file, convert to Markdown, and optionally index it |
-| `/api/web-pages` | GET/POST | List or import public web pages for the current session |
-| `/api/web-pages/:id` | DELETE | Remove a web page from the current session |
 | `/api/chat` | POST | Retrieval Q&A or full-document answer generation |
 | `/api/search` | POST | Retrieval-only debug endpoint |
 | `/api/documents` | GET | List uploaded document metadata |
@@ -206,9 +203,6 @@ Code-level config in `config.js`:
 - Semantic and hybrid retrieval require Gemini embeddings.
 - BM25 mode can work without Gemini embeddings, but answer generation still needs Gemini.
 - Wiki files are injected directly into prompts and are not returned by `/api/search`.
-- Web pages are rendered with Playwright/Chromium, saved under `data/session-web/`, selectable in Web pages mode, and cleaned up on server restart/shutdown.
-- Web pages support `Auto`, `Fast`, and `Full scan` read depth. Full scan reads every page chunk before synthesis, which is slower but reduces missed details on long pages.
-- Web page URLs must be public `http`/`https`; localhost and private-network URLs are rejected.
 - Full-document mode falls back to slice-and-synthesize when selected content exceeds the token budget.
 - `data/index.json` is local metadata and may change during testing; document content and LanceDB storage stay local on each machine.
 - The repo currently has no automated test suite wired into `package.json`.

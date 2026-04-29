@@ -339,34 +339,6 @@ function buildFullDocumentSystemInstruction() {
   ].join("\n");
 }
 
-function buildQwenFormalStyleInstruction() {
-  return [
-    "Style requirements for Qwen models:",
-    "Use a formal, neutral, professional register.",
-    "When answering in Vietnamese, prefer precise Vietnamese terms and avoid casual phrasing.",
-    "Use a short opening sentence when helpful, followed by numbered points or concise paragraphs for multi-part answers.",
-    "Avoid dense single-paragraph responses; add clear line breaks between major ideas.",
-    "Do not use emojis, exclamation marks, conversational filler, or promotional language.",
-    "Keep claims tightly grounded in the provided context and state uncertainty formally when evidence is incomplete.",
-    "Place citations at the end of the relevant sentence, separated by a space, for example: noi dung cau tra loi [source-id].",
-  ].join("\n");
-}
-
-function withProviderSystemInstruction({ provider, model, systemInstruction }) {
-  const baseInstruction = systemInstruction || buildGeminiSystemInstruction();
-  const modelId = String(model || "").toLowerCase();
-  const isQwen = provider === "dashscope" || modelId.includes("qwen");
-
-  if (!isQwen) {
-    return baseInstruction;
-  }
-
-  return [
-    baseInstruction,
-    buildQwenFormalStyleInstruction(),
-  ].join("\n\n");
-}
-
 function buildDocumentSliceSystemInstruction() {
   return [
     "Extract only information from the supplied slice that may help answer the user's request.",
@@ -587,7 +559,7 @@ async function postModelGenerateContent({
       model,
       prompt,
       maxOutputTokens,
-      systemInstruction: withProviderSystemInstruction({ provider, model, systemInstruction }),
+      systemInstruction: systemInstruction || buildGeminiSystemInstruction(),
     });
   }
 
@@ -596,7 +568,7 @@ async function postModelGenerateContent({
     model,
     prompt,
     maxOutputTokens,
-    systemInstruction: withProviderSystemInstruction({ provider, model, systemInstruction }),
+    systemInstruction,
     responseMimeType,
     responseJsonSchema,
   });
