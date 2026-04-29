@@ -13,7 +13,6 @@
     "busboy": "^1.6.0",
     "dotenv": "^17.4.2",
     "mammoth": "^1.12.0",
-    "openai": "^6.34.0",
-    "playwright": "^1.59.1"
+    "openai": "^6.34.0"
   }
 }

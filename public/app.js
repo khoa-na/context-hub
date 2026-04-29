@@ -1,12 +1,10 @@
 const state = {
   documents: [],
-  webPages: [],
   history: [],
   providers: [],
   models: [],
   selectedModel: "",
   selectedDocIds: new Set(),
-  selectedWebPageIds: new Set(),
 };
 
 const fileInput = document.querySelector("#file-input");
@@ -14,10 +12,6 @@ const selectedFileName = document.querySelector("#selected-file-name");
 const uploadButton = document.querySelector("#upload-button");
 const uploadStatus = document.querySelector("#upload-status");
 const documentList = document.querySelector("#document-list");
-const webUrlInput = document.querySelector("#web-url-input");
-const webSummarizeButton = document.querySelector("#web-summarize-button");
-const webStatus = document.querySelector("#web-status");
-const webPageList = document.querySelector("#web-page-list");
 const apiKeyInput = document.querySelector("#api-key-input");
 const saveKeyButton = document.querySelector("#save-key-button");
 const dashscopeApiKeyInput = document.querySelector("#dashscope-api-key-input");
@@ -35,11 +29,6 @@ const documentFocusRow = document.querySelector("#document-focus-row");
 const docPickerList = document.querySelector("#doc-picker-list");
 const docSelectAllBtn = document.querySelector("#doc-select-all-btn");
 const docClearAllBtn = document.querySelector("#doc-clear-all-btn");
-const webPageFocusRow = document.querySelector("#web-page-focus-row");
-const webPagePickerList = document.querySelector("#web-page-picker-list");
-const webPageSelectAllBtn = document.querySelector("#web-page-select-all-btn");
-const webPageClearAllBtn = document.querySelector("#web-page-clear-all-btn");
-const webPageReadModeSelect = document.querySelector("#web-page-read-mode");
 const chatLog = document.querySelector("#chat-log");
 const sourceList = document.querySelector("#source-list");
 const sourcesToggle = document.querySelector("#sources-toggle");
@@ -159,78 +148,6 @@ function renderDocuments() {
   });
 }
 
-function renderWebPages() {
-  if (!state.webPages.length) {
-    webPageList.innerHTML = '<p class="empty-state">No session pages yet.</p>';
-    webPagePickerList.innerHTML = '<p class="empty-state">No session pages available</p>';
-    return;
-  }
-
-  webPageList.innerHTML = state.webPages
-    .map((page) => `
-      <div class="doc-card" data-id="${escapeHtml(page.id)}">
-        <div class="doc-card-row">
-          <div>
-            <span class="doc-title">${escapeHtml(page.title || "Web page")}</span>
-            <span class="doc-meta">${escapeHtml(page.url || "")}</span>
-          </div>
-          <button class="doc-delete-btn" data-id="${escapeHtml(page.id)}" title="Remove session page">&times;</button>
-        </div>
-      </div>
-    `)
-    .join("");
-
-  webPageList.querySelectorAll(".doc-delete-btn").forEach((btn) => {
-    btn.addEventListener("click", async (e) => {
-      const id = e.currentTarget.dataset.id;
-      try {
-        const resp = await fetch(`/api/web-pages/${encodeURIComponent(id)}`, { method: "DELETE" });
-        const payload = await resp.json();
-        if (!resp.ok) {
-          throw new Error(payload.error || "Delete failed");
-        }
-        state.webPages = state.webPages.filter((page) => page.id !== id);
-        state.selectedWebPageIds.delete(id);
-        renderWebPages();
-        renderWebPagePicker();
-      } catch (err) {
-        webStatus.textContent = err.message;
-      }
-    });
-  });
-}
-
-function renderWebPagePicker() {
-  if (!state.webPages.length) {
-    webPagePickerList.innerHTML = '<p class="empty-state">No session pages available</p>';
-    return;
-  }
-
-  webPagePickerList.innerHTML = state.webPages
-    .map((page) => {
-      const checked = state.selectedWebPageIds.has(page.id) ? "checked" : "";
-      return `
-        <label class="doc-picker-item">
-          <input type="checkbox" value="${escapeHtml(page.id)}" ${checked} />
-          <span class="doc-picker-title">${escapeHtml(page.title || "Web page")}</span>
-          <span class="doc-picker-meta">${escapeHtml(page.url || "")}</span>
-        </label>
-      `;
-    })
-    .join("");
-
-  webPagePickerList.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      if (cb.checked) {
-        state.selectedWebPageIds.add(cb.value);
-      } else {
-        state.selectedWebPageIds.delete(cb.value);
-      }
-      renderWebPagePicker();
-    });
-  });
-}
-
 function renderDocumentPicker() {
   if (!state.documents.length) {
     docPickerList.innerHTML = '<p class="empty-state">No documents available</p>';
@@ -275,17 +192,6 @@ function selectAllDocuments() {
   renderDocumentPicker();
 }
 
-function selectAllWebPages() {
-  state.selectedWebPageIds.clear();
-  state.webPages.forEach((page) => state.selectedWebPageIds.add(page.id));
-  renderWebPagePicker();
-}
-
-function clearAllWebPages() {
-  state.selectedWebPageIds.clear();
-  renderWebPagePicker();
-}
-
 function renderModelOptions() {
   if (!state.models.length) {
     modelSelect.innerHTML = '<option value="">No models available</option>';
@@ -326,34 +232,21 @@ function clearAllDocuments() {
 
 docSelectAllBtn.addEventListener("click", selectAllDocuments);
 docClearAllBtn.addEventListener("click", clearAllDocuments);
-webPageSelectAllBtn.addEventListener("click", selectAllWebPages);
-webPageClearAllBtn.addEventListener("click", clearAllWebPages);
 
 function getSelectedDocumentIds() {
   return Array.from(state.selectedDocIds).slice(0, FULL_DOCUMENT_MAX_SELECTED_DOCS);
 }
 
-function getSelectedWebPageIds() {
-  return Array.from(state.selectedWebPageIds);
-}
-
 function updateChatModeUI() {
   const isFullDocumentMode = chatModeSelect.value === "full-document";
-  const isWebPageMode = chatModeSelect.value === "web-pages";
 
   documentFocusRow.hidden = !isFullDocumentMode;
-  webPageFocusRow.hidden = !isWebPageMode;
-  retrievalModeSelect.disabled = isFullDocumentMode || isWebPageMode;
-  debugSearchToggle.disabled = isFullDocumentMode || isWebPageMode;
-
-  if (isFullDocumentMode || isWebPageMode) {
-    debugSearchToggle.checked = false;
-  }
+  retrievalModeSelect.disabled = false;
+  debugSearchToggle.disabled = false;
 
   if (isFullDocumentMode) {
+    debugSearchToggle.checked = false;
     chatInput.placeholder = "Ask for a summary, comparison, or analysis of the selected documents...";
-  } else if (isWebPageMode) {
-    chatInput.placeholder = "Ask about the selected web pages...";
   } else {
     chatInput.placeholder = "Ask anything about your documents...";
   }
@@ -375,30 +268,12 @@ function buildStructuredAnswerHtml(payload) {
   const rawModelText = typeof payload?.rawModelText === "string" ? payload.rawModelText.trim() : "";
   const citations = Array.isArray(payload?.structured?.citations) ? payload.structured.citations : [];
   const followUpQuestions = Array.isArray(payload?.structured?.follow_up_questions) ? payload.structured.follow_up_questions : [];
-  const processMeta = [];
-  if (payload?.processingMode) {
-    processMeta.push(payload.processingMode);
-  }
-  if (payload?.sliceCount && payload?.totalSliceCount) {
-    processMeta.push(`${payload.sliceCount}/${payload.totalSliceCount} slices`);
-  }
 
   if (!answer && rawModelText) {
     return `<p>${escapeHtml(rawModelText)}</p>`;
   }
 
   let html = `<p>${escapeHtml(answer)}</p>`;
-
-  if (processMeta.length) {
-    html += `
-      <div class="structured-chat-section">
-        <div class="structured-chat-label">Read Process</div>
-        <div class="structured-chat-tags">
-          ${processMeta.map((item) => `<span class="structured-chat-tag">${escapeHtml(item)}</span>`).join("")}
-        </div>
-      </div>
-    `;
-  }
 
   if (citations.length) {
     html += `
@@ -576,24 +451,6 @@ async function loadDocuments() {
   updateChatModeUI();
 }
 
-async function loadWebPages() {
-  try {
-    const response = await fetch("/api/web-pages");
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "Failed to load session pages.");
-    }
-    state.webPages = payload.pages || [];
-    state.selectedWebPageIds = new Set(
-      Array.from(state.selectedWebPageIds).filter((id) => state.webPages.some((page) => page.id === id))
-    );
-    renderWebPages();
-    renderWebPagePicker();
-  } catch (error) {
-    webPageList.innerHTML = '<p class="empty-state">Could not load session pages.</p>';
-  }
-}
-
 async function uploadSingleDocument(file, apiKey) {
   const formData = new FormData();
   formData.append("file", file);
@@ -684,60 +541,6 @@ fileInput.addEventListener("change", () => {
   updateSelectedFileUI();
 });
 
-function parseWebUrls(value) {
-  return [...new Set(
-    String(value || "")
-      .split(/[\s,]+/)
-      .map((part) => part.trim())
-      .filter((part) => /^https?:\/\//i.test(part))
-  )];
-}
-
-webSummarizeButton.addEventListener("click", async () => {
-  const urls = parseWebUrls(webUrlInput.value);
-  if (!urls.length) {
-    webStatus.textContent = "Paste one or more public URLs first.";
-    return;
-  }
-
-  webSummarizeButton.disabled = true;
-  webStatus.textContent = `Opening ${urls.length} page${urls.length === 1 ? "" : "s"}...`;
-
-  try {
-    const response = await fetch("/api/web-pages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        urls,
-        summarize: false,
-      }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "Web page import failed.");
-    }
-
-    const pages = payload.pages || (payload.page ? [payload.page] : []);
-    const existingIds = new Set(state.webPages.map((page) => page.id));
-    state.webPages = [
-      ...pages.filter((page) => !existingIds.has(page.id)),
-      ...state.webPages,
-    ];
-    pages.forEach((page) => state.selectedWebPageIds.add(page.id));
-    renderWebPages();
-    renderWebPagePicker();
-    const failedCount = Array.isArray(payload.failures) ? payload.failures.length : 0;
-    webStatus.textContent = failedCount
-      ? `Added ${pages.length} page${pages.length === 1 ? "" : "s"}. ${failedCount} URL${failedCount === 1 ? "" : "s"} failed.`
-      : `Added ${pages.length} page${pages.length === 1 ? "" : "s"} for this session.`;
-    webUrlInput.value = "";
-  } catch (error) {
-    webStatus.textContent = error.message;
-  } finally {
-    webSummarizeButton.disabled = false;
-  }
-});
-
 saveKeyButton.addEventListener("click", () => {
   saveApiKey("google", apiKeyInput, keyStatus);
 });
@@ -760,9 +563,8 @@ chatModeSelect.addEventListener("change", () => {
   updateChatModeUI();
   if (chatModeSelect.value === "full-document") {
     selectAllDocuments();
-  } else if (chatModeSelect.value === "web-pages") {
-    selectAllWebPages();
   }
+  resetConversation(true);
 });
 
 newSessionButton.addEventListener("click", () => {
@@ -866,18 +668,7 @@ chatForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  if (chatMode === "web-pages" && !state.webPages.length) {
-    renderChatMessage("assistant", "Add one or more web pages first before using Web pages mode.");
-    return;
-  }
-
-  if (chatMode === "web-pages" && state.selectedWebPageIds.size === 0) {
-    renderChatMessage("assistant", "Select one or more target web pages before using Web pages mode.");
-    return;
-  }
-
   const selectedDocumentIds = chatMode === "full-document" ? getSelectedDocumentIds() : [];
-  const selectedWebPageIds = chatMode === "web-pages" ? getSelectedWebPageIds() : [];
 
   renderChatMessage("user", question);
   chatInput.value = "";
@@ -888,16 +679,7 @@ chatForm.addEventListener("submit", async (event) => {
 
     const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
 
-    const webPageReadMode = webPageReadModeSelect?.value || "auto";
-    const loadingText = chatMode === "web-pages" && webPageReadMode === "full-scan"
-      ? "Scanning every selected web page chunk..."
-      : chatMode === "web-pages"
-        ? "Reading the selected web pages..."
-        : chatMode === "full-document"
-          ? "Reading the full document..."
-          : "Generating answer...";
-
-    renderChatMessage("assistant", isDebugSearch ? "Searching..." : loadingText);
+    renderChatMessage("assistant", isDebugSearch ? "Searching..." : chatMode === "full-document" ? "Reading the full document..." : "Generating answer...");
 
     const response = await fetch(requestPath, {
       method: "POST",
@@ -911,9 +693,6 @@ chatForm.addEventListener("submit", async (event) => {
         chatMode,
         documentId: chatMode === "full-document" ? (selectedDocumentIds[0] || "") : "",
         documentIds: selectedDocumentIds,
-        webPageId: chatMode === "web-pages" ? (selectedWebPageIds[0] || "") : "",
-        webPageIds: selectedWebPageIds,
-        webPageReadMode: chatMode === "web-pages" ? webPageReadMode : "auto",
         retrievalMode: retrievalModeSelect.value,
       }),
     });
@@ -973,6 +752,5 @@ hydrateApiKey();
 updateChatModeUI();
 updateSelectedFileUI();
 loadDocuments().catch((error) => { uploadStatus.textContent = error.message; });
-loadWebPages();
 loadWikiFiles();
 loadModels();

@@ -5,23 +5,13 @@ const config = require("../config");
 const { ROOT, DOCS_DIR } = require("../constants");
 const { getDocChunkCounts, removeDocumentChunks, createIndexes } = require("../db");
 const { sendJson, parseJson } = require("../lib/http");
-const { getApiKeyForProvider, getProviderForModel } = require("../lib/model-providers");
+const { getApiKeyForProvider } = require("../lib/model-providers");
 const { ensureSession, rotateSession, writeSession } = require("../lib/session");
 const { parseMultipartFile } = require("../lib/uploads");
 const { convertToMarkdown, convertUploadToMarkdown, slugify, repairTextEncoding } = require("../lib/markdown");
 const { readIndex, writeIndex, saveEnvValue } = require("../lib/storage");
-const {
-  renderWebPageToMarkdown,
-  saveSessionWebPage,
-  pruneMissingSessionWebPages,
-  deleteSessionWebPage,
-} = require("../lib/web-pages");
 const { splitIntoChunks } = require("../lib/chunking");
 const { indexDocumentContent, rebuildAllIndexes } = require("../services/indexing");
-const {
-  buildFullDocumentSystemInstruction,
-  generateStructuredGeminiAnswer,
-} = require("../services/gemini");
 const {
   normalizeChatMode,
   normalizeRetrievalMode,
@@ -29,7 +19,6 @@ const {
   retrieveRelevantChunks,
   serializeChunk,
   answerWithFullDocument,
-  answerWithWebPages,
   callGemini,
 } = require("../services/chat");
 
@@ -227,23 +216,15 @@ async function handleChat(req, res) {
   const chatMode = normalizeChatMode(String(body.chatMode || "qa").trim().toLowerCase());
   const documentId = String(body.documentId || "").trim();
   const documentIds = Array.isArray(body.documentIds) ? body.documentIds : [];
-  const webPageId = String(body.webPageId || "").trim();
-  const webPageIds = Array.isArray(body.webPageIds) ? body.webPageIds : [];
-  const webPageReadMode = String(body.webPageReadMode || "auto").trim().toLowerCase();
   const retrievalMode = normalizeRetrievalMode(String(body.retrievalMode || "hybrid").trim().toLowerCase());
 
   if (!question) {
     return sendJson(res, 400, { error: "question is required." });
   }
 
-  let result;
-  if (chatMode === "full-document") {
-    result = await answerWithFullDocument({ question, history: session.history, apiKey, apiKeys, model, documentId, documentIds });
-  } else if (chatMode === "web-pages") {
-    result = await answerWithWebPages({ question, history: session.history, apiKey, apiKeys, model, session, webPageId, webPageIds, webPageReadMode });
-  } else {
-    result = await callGemini({ question, history: session.history, apiKey, apiKeys, model, tenantId: "default", retrievalMode, session });
-  }
+  const result = chatMode === "full-document"
+    ? await answerWithFullDocument({ question, history: session.history, apiKey, apiKeys, model, documentId, documentIds })
+    : await callGemini({ question, history: session.history, apiKey, apiKeys, model, tenantId: "default", retrievalMode });
 
   session.history.push(
     { role: "user", content: question },
@@ -268,148 +249,6 @@ async function handleChat(req, res) {
     schemaPreset: result.schemaPreset || null,
     chunks: result.chunks.map(serializeChunk),
   });
-}
-
-function buildWebPageSummaryPrompt({ question, page, markdown }) {
-  return [
-    "Summarize this rendered public web page for the user.",
-    "Use only the supplied web page markdown.",
-    "Answer in the same language as the user.",
-    "",
-    `Web page title: ${page.title}`,
-    `Source URL: ${page.url}`,
-    "",
-    "=== WEB PAGE MARKDOWN ===",
-    markdown,
-    "",
-    `=== USER REQUEST ===\n${question || "Tom tat trang web nay"}`,
-  ].join("\n");
-}
-
-function buildWebPageSource({ page, markdown }) {
-  return {
-    id: `web:${page.id}`,
-    title: page.title,
-    filename: page.url,
-    content: markdown.slice(0, 2400),
-    childContent: "",
-    score: null,
-    retrieval: {
-      sources: ["web-page"],
-    },
-  };
-}
-
-async function handleCreateWebPage(req, res) {
-  const body = await parseJson(req);
-  const session = await ensureSession(req, res);
-  const urls = Array.isArray(body.urls) ? body.urls : [body.url];
-  const normalizedUrls = urls.map((url) => String(url || "").trim()).filter(Boolean);
-  const apiKeys = body.apiKeys && typeof body.apiKeys === "object" ? body.apiKeys : {};
-  const legacyApiKey = String(body.apiKey || "").trim();
-  const model = String(body.model || "").trim();
-  const question = String(body.question || "Tóm tắt trang web này").trim();
-  const shouldSummarize = body.summarize === true;
-
-  if (!normalizedUrls.length) {
-    return sendJson(res, 400, { error: "url is required." });
-  }
-
-  const provider = getProviderForModel(model);
-  const apiKey = getApiKeyForProvider({ provider, apiKeys, legacyApiKey });
-  if (shouldSummarize && !apiKey) {
-    return sendJson(res, 400, { error: `Missing ${provider} API key. Add it to the environment or paste a key into the app.` });
-  }
-
-  const imported = [];
-  const failures = [];
-  for (const url of normalizedUrls) {
-    try {
-      const rendered = await renderWebPageToMarkdown(url);
-      const page = await saveSessionWebPage({ session, rendered });
-      imported.push({ page, rendered });
-    } catch (error) {
-      failures.push({ url, error: error.message || "Failed to import this URL." });
-    }
-  }
-
-  if (!imported.length) {
-    return sendJson(res, 400, {
-      error: failures[0]?.error || "Could not import any web pages.",
-      failures,
-    });
-  }
-
-  if (!shouldSummarize) {
-    await writeSession(session);
-    return sendJson(res, 201, {
-      pages: imported.map((item) => item.page),
-      page: imported[0]?.page || null,
-      importedCount: imported.length,
-      failures,
-      sessionId: session.id,
-    });
-  }
-
-  if (imported.length > 1) {
-    await writeSession(session);
-    return sendJson(res, 201, {
-      pages: imported.map((item) => item.page),
-      page: imported[0]?.page || null,
-      importedCount: imported.length,
-      failures,
-      sessionId: session.id,
-      warning: "Multiple pages were imported. Ask about them in Web pages mode.",
-    });
-  }
-
-  const { page, rendered } = imported[0];
-  const response = await generateStructuredGeminiAnswer({
-    apiKey,
-    provider,
-    model,
-    maxOutputTokens: 700,
-    systemInstruction: buildFullDocumentSystemInstruction(),
-    prompt: buildWebPageSummaryPrompt({ question, page, markdown: rendered.markdown }),
-    useResponseSchema: false,
-  });
-
-  session.history.push(
-    { role: "user", content: `${question}\n${page.url}` },
-    { role: "assistant", content: response.answer }
-  );
-  await writeSession(session);
-
-  const source = buildWebPageSource({ page, markdown: rendered.markdown });
-  return sendJson(res, 201, {
-    page,
-    answer: response.answer,
-    structured: response.structured || null,
-    rawModelText: response.rawText || "",
-    chatMode: "web-page",
-    retrievalMode: "web-page",
-    sessionId: session.id,
-    chunks: [serializeChunk(source)],
-  });
-}
-
-async function handleWebPages(req, res) {
-  const session = await ensureSession(req, res);
-  const changed = await pruneMissingSessionWebPages(session);
-  if (changed) {
-    await writeSession(session);
-  }
-  return sendJson(res, 200, { pages: session.webPages || [] });
-}
-
-async function handleDeleteWebPage(req, res, pageId) {
-  const session = await ensureSession(req, res);
-  const deleted = await deleteSessionWebPage(session, pageId);
-  if (!deleted) {
-    return sendJson(res, 404, { error: "Web page not found." });
-  }
-  await writeSession(session);
-  return sendJson(res, 200, { deleted: pageId });
 }
 
 async function handleSearch(req, res) {
@@ -556,9 +395,6 @@ module.exports = {
   handleUpload,
   handleDocuments,
   handleDeleteDocument,
-  handleCreateWebPage,
-  handleWebPages,
-  handleDeleteWebPage,
   handleChat,
   handleSearch,
   handleSessionReset,

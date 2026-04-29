@@ -6,15 +6,12 @@ const path = require("path");
 const config = require("./config");
 const { MIME_TYPES, PUBLIC_DIR } = require("./constants");
 const { sendJson } = require("./lib/http");
-const { ensureStorage, cleanupSessionWebStorage } = require("./lib/storage");
+const { ensureStorage } = require("./lib/storage");
 const { autoIndexUnindexedDocs } = require("./services/indexing");
 const {
   handleUpload,
   handleDocuments,
   handleDeleteDocument,
-  handleCreateWebPage,
-  handleWebPages,
-  handleDeleteWebPage,
   handleChat,
   handleSearch,
   handleSessionReset,
@@ -30,8 +27,6 @@ const HOST = String(process.env.HOST || "0.0.0.0").trim();
 const ROUTES = [
   ["GET", "/api/documents", handleDocuments],
   ["POST", "/api/upload", handleUpload],
-  ["GET", "/api/web-pages", handleWebPages],
-  ["POST", "/api/web-pages", handleCreateWebPage],
   ["POST", "/api/wiki-upload", handleWikiUpload],
   ["GET", "/api/wiki-list", handleWikiList],
   ["POST", "/api/save-key", handleSaveKey],
@@ -85,11 +80,6 @@ async function router(req, res) {
     if (req.method === "DELETE" && url.pathname.startsWith("/api/documents/")) {
       const docId = url.pathname.slice("/api/documents/".length);
       return await handleDeleteDocument(req, res, docId);
-    }
-
-    if (req.method === "DELETE" && url.pathname.startsWith("/api/web-pages/")) {
-      const pageId = url.pathname.slice("/api/web-pages/".length);
-      return await handleDeleteWebPage(req, res, pageId);
     }
 
     if (req.method === "GET" && url.pathname === "/api/models") {
@@ -146,17 +136,6 @@ async function start() {
   await autoIndexUnindexedDocs();
 
   const server = http.createServer(router);
-  async function shutdown() {
-    try {
-      await cleanupSessionWebStorage();
-    } catch {}
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 1500).unref();
-  }
-
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
-
   server.listen(PORT, HOST, () => {
     logStartupUrls(PORT, HOST);
   });
