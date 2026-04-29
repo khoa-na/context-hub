@@ -412,8 +412,8 @@ async function selectSemanticWebPageExcerpts({ pages, question, schemaPreset, ap
 
 function buildFocusedWebPagesPrompt({ question, history, documents, excerpts, schemaInstruction }) {
   const historyLines = (history || [])
-    .slice(-4)
-    .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
+    .slice(-16)
+    .map((entry) => `[${entry.role === "assistant" ? "Assistant" : "User"}]: ${entry.content}`)
     .join("\n");
 
   return [
@@ -497,8 +497,8 @@ function buildWebPageScanPrompt({ question, documents, sliceText, sliceIndex, to
 
 function buildWebPageScanSynthesisPrompt({ question, history, documents, scanNotes, schemaInstruction }) {
   const historyLines = (history || [])
-    .slice(-4)
-    .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
+    .slice(-16)
+    .map((entry) => `[${entry.role === "assistant" ? "Assistant" : "User"}]: ${entry.content}`)
     .join("\n");
 
   return [
