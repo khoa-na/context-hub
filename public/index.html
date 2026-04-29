@@ -66,6 +66,16 @@
         </section>
 
         <section class="sidebar-section">
+          <h3 class="sidebar-title">Web Page <span class="badge">session</span></h3>
+          <div class="web-url-row">
+            <textarea id="web-url-input" rows="3" placeholder="Paste one or more public URLs" autocomplete="off" spellcheck="false"></textarea>
+            <button id="web-summarize-button" class="btn-accent" type="button">Add pages</button>
+          </div>
+          <p id="web-status" class="status-line"></p>
+          <div id="web-page-list" class="file-list"></div>
+        </section>
+
+        <section class="sidebar-section">
           <h3 class="sidebar-title">Wiki Files <span class="badge">always on</span></h3>
           <label class="dropzone dropzone-sm" for="wiki-file-input">
             <input id="wiki-file-input" type="file" accept=".md,.txt,.text" />
@@ -100,6 +110,7 @@
               <select id="chat-mode">
                 <option value="qa" selected>Q&A</option>
                 <option value="full-document">Full document</option>
+                <option value="web-pages">Web pages</option>
               </select>
               <span>Model</span>
               <select id="model-select"></select>
@@ -123,6 +134,24 @@
                 </div>
               </div>
               <div id="doc-picker-list" class="doc-picker-list"></div>
+            </div>
+            <div id="web-page-focus-row" class="document-focus-row" hidden>
+              <div class="doc-picker-header">
+                <span>Target web pages</span>
+                <div class="doc-picker-actions">
+                  <label class="compact-select-label">
+                    <span>Read depth</span>
+                    <select id="web-page-read-mode">
+                      <option value="auto" selected>Auto</option>
+                      <option value="fast">Fast</option>
+                      <option value="full-scan">Full scan</option>
+                    </select>
+                  </label>
+                  <button id="web-page-select-all-btn" type="button" class="doc-picker-btn">Select all</button>
+                  <button id="web-page-clear-all-btn" type="button" class="doc-picker-btn">Clear all</button>
+                </div>
+              </div>
+              <div id="web-page-picker-list" class="doc-picker-list"></div>
             </div>
             <textarea id="chat-input" rows="1" placeholder="Ask anything about your documents..."></textarea>
           </div>
