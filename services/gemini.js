@@ -380,8 +380,8 @@ function buildDocumentSliceSystemInstruction() {
 
 function buildGeminiUserPrompt({ question, contextText, history }) {
   const historyLines = (history || [])
-    .slice(-4)
-    .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
+    .slice(-16)
+    .map((entry) => `[${entry.role === "assistant" ? "Assistant" : "User"}]: ${entry.content}`)
     .join("\n");
 
   return [
@@ -411,8 +411,8 @@ function buildDocumentsMarkdownBlock(documents) {
 
 function buildDirectFullDocumentPrompt({ question, history, documents, schemaInstruction }) {
   const historyLines = (history || [])
-    .slice(-4)
-    .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
+    .slice(-16)
+    .map((entry) => `[${entry.role === "assistant" ? "Assistant" : "User"}]: ${entry.content}`)
     .join("\n");
 
   return [
@@ -512,8 +512,8 @@ function buildCompressedSummariesPrompt({ question, documents, summaries, batchI
 
 function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceSummaries, documentSummaries, schemaInstruction }) {
   const historyLines = (history || [])
-    .slice(-4)
-    .map((entry) => `${entry.role === "assistant" ? "Assistant" : "User"}: ${entry.content}`)
+    .slice(-16)
+    .map((entry) => `[${entry.role === "assistant" ? "Assistant" : "User"}]: ${entry.content}`)
     .join("\n");
   const summaries = documentSummaries || sliceSummaries || [];
 
