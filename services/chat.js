@@ -4,6 +4,12 @@ const { semanticSearch, bm25Search, hybridSearch } = require("../db");
 const { getApiKeyForProvider, getProviderForModel } = require("../lib/model-providers");
 const { loadWikiContext, loadAllDocumentsWithMarkdown } = require("../lib/storage");
 const { loadSessionWebPagesWithMarkdown } = require("../lib/web-pages");
+const {
+  loadAssistanceGuide,
+  getTodayAssistanceBrief,
+  buildAssistanceSystemInstruction,
+  buildAssistanceUserPrompt,
+} = require("../lib/assistance");
 const { truncateToTokenBudget } = require("../lib/text");
 const { splitIntoChunks, getDocumentSections, splitContentIntoSlices } = require("../lib/chunking");
 const { getGeminiEmbedding, getGeminiEmbeddingBatch } = require("../embedding");
@@ -39,7 +45,7 @@ function retrievalUsesEmbedding(retrievalMode) {
 }
 
 function normalizeChatMode(value) {
-  if (value === "full-document" || value === "web-pages") {
+  if (value === "full-document" || value === "web-pages" || value === "assistance") {
     return value;
   }
   return "qa";
@@ -1232,6 +1238,40 @@ async function answerWithWebPages({ question, history, apiKey: legacyApiKey, api
   };
 }
 
+async function answerWithAssistance({ question, history, apiKey: legacyApiKey, apiKeys = {}, model }) {
+  const provider = getProviderForModel(model);
+  const apiKey = getApiKeyForProvider({ provider, apiKeys, legacyApiKey });
+  if (!apiKey) {
+    throw new Error(`Missing ${provider} API key. Add it to the environment or paste a key into the app.`);
+  }
+
+  const [guide, brief] = await Promise.all([
+    loadAssistanceGuide(),
+    getTodayAssistanceBrief(),
+  ]);
+
+  const answer = await generateGeminiAnswer({
+    apiKey,
+    provider,
+    model,
+    maxOutputTokens: 700,
+    systemInstruction: buildAssistanceSystemInstruction(guide),
+    prompt: buildAssistanceUserPrompt({ question, history, brief }),
+  });
+
+  return {
+    answer,
+    structured: null,
+    rawModelText: "",
+    chunks: [],
+    retrievalMode: "assistance",
+    chatMode: "assistance",
+    documents: [],
+    documentCount: 0,
+    processingMode: "internal-brief",
+  };
+}
+
 async function llmRerankChunks({ question, chunks, topK, apiKey, provider, model }) {
   if (!chunks.length || chunks.length <= topK) return { chunks, none: false };
 
@@ -1451,6 +1491,7 @@ module.exports = {
   llmRerankChunks,
   answerWithFullDocument,
   answerWithWebPages,
+  answerWithAssistance,
   callGemini,
   callGeminiStream,
 };

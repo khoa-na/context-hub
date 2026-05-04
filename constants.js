@@ -4,6 +4,8 @@ const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_DIR = path.join(ROOT, "data");
 const DOCS_DIR = path.join(DATA_DIR, "documents");
+const INTERNAL_DIR = path.join(DATA_DIR, "internal");
+const INTERNAL_TASKS_PATH = path.join(INTERNAL_DIR, "tasks.json");
 const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
 const SESSION_WEB_DIR = path.join(DATA_DIR, "session-web");
 const INDEX_PATH = path.join(DATA_DIR, "index.json");
@@ -56,6 +58,8 @@ module.exports = {
   PUBLIC_DIR,
   DATA_DIR,
   DOCS_DIR,
+  INTERNAL_DIR,
+  INTERNAL_TASKS_PATH,
   SESSIONS_DIR,
   SESSION_WEB_DIR,
   INDEX_PATH,

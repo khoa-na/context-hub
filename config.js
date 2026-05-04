@@ -29,5 +29,5 @@ module.exports = {
     { id: "qwen3.6-35b-a3b", name: "Qwen3.6 35B A3B", provider: "dashscope" },
     { id: "qwen3.6-27b", name: "Qwen3.6 27B", provider: "dashscope" },
   ],
-  DEFAULT_MODEL: "gemma-4-31b-it",
+  DEFAULT_MODEL: "gemma-4-26b-a4b-it",
 };
