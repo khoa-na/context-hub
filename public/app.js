@@ -7,6 +7,7 @@ const state = {
   selectedModel: "",
   selectedDocIds: new Set(),
   selectedWebPageIds: new Set(),
+  assistanceBriefShown: false,
 };
 
 const fileInput = document.querySelector("#file-input");
@@ -340,13 +341,14 @@ function getSelectedWebPageIds() {
 function updateChatModeUI() {
   const isFullDocumentMode = chatModeSelect.value === "full-document";
   const isWebPageMode = chatModeSelect.value === "web-pages";
+  const isAssistanceMode = chatModeSelect.value === "assistance";
 
   documentFocusRow.hidden = !isFullDocumentMode;
   webPageFocusRow.hidden = !isWebPageMode;
-  retrievalModeSelect.disabled = isFullDocumentMode || isWebPageMode;
-  debugSearchToggle.disabled = isFullDocumentMode || isWebPageMode;
+  retrievalModeSelect.disabled = isFullDocumentMode || isWebPageMode || isAssistanceMode;
+  debugSearchToggle.disabled = isFullDocumentMode || isWebPageMode || isAssistanceMode;
 
-  if (isFullDocumentMode || isWebPageMode) {
+  if (isFullDocumentMode || isWebPageMode || isAssistanceMode) {
     debugSearchToggle.checked = false;
   }
 
@@ -354,6 +356,8 @@ function updateChatModeUI() {
     chatInput.placeholder = "Ask for a summary, comparison, or analysis of the selected documents...";
   } else if (isWebPageMode) {
     chatInput.placeholder = "Ask about the selected web pages...";
+  } else if (isAssistanceMode) {
+    chatInput.placeholder = "Nhắn với DS về việc hôm nay...";
   } else {
     chatInput.placeholder = "Ask anything about your documents...";
   }
@@ -494,6 +498,82 @@ function extractRenderedAnswer(payload) {
   return typeof payload?.answer === "string" ? payload.answer : "";
 }
 
+function renderAssistantPayload(payload, { isDebugSearch = false } = {}) {
+  const renderedAnswer = extractRenderedAnswer(payload);
+  const lastMsgBody = chatLog.querySelector(".msg:last-child .msg-body");
+  const lastMsg = lastMsgBody?.querySelector("p");
+
+  if (lastMsgBody) {
+    if (isDebugSearch) {
+      lastMsgBody.innerHTML = `<p>${escapeHtml(buildSearchDebugSummary(payload))}</p>`;
+    } else if (payload.structured || (typeof payload.rawModelText === "string" && payload.rawModelText.trim())) {
+      lastMsgBody.innerHTML = buildStructuredAnswerHtml(payload);
+    } else if (lastMsg) {
+      lastMsg.textContent = renderedAnswer;
+    } else {
+      lastMsgBody.innerHTML = `<p>${escapeHtml(renderedAnswer)}</p>`;
+    }
+  }
+
+  renderSources(payload.chunks || []);
+  return renderedAnswer;
+}
+
+async function requestChatCompletion(requestBody, { isDebugSearch = false } = {}) {
+  const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
+  const response = await fetch(requestPath, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || "Chat failed.");
+  }
+
+  return payload;
+}
+
+async function loadAssistanceToday({ force = false } = {}) {
+  if (state.assistanceBriefShown && !force) {
+    return;
+  }
+
+  if (chatModeSelect.value !== "assistance") {
+    return;
+  }
+
+  renderChatMessage("assistant", "DS đang xem việc hôm nay...");
+
+  try {
+    const apiKeys = getApiKeys();
+    const payload = await requestChatCompletion({
+      question: "DS kiểm tra công việc hôm nay và nhắc anh/chị việc cần ưu tiên. Tự đánh giá từ danh sách việc nội bộ, không dựa vào trường priority.",
+      history: state.history,
+      apiKey: apiKeys.google,
+      apiKeys,
+      model: state.selectedModel,
+      chatMode: "assistance",
+      documentId: "",
+      documentIds: [],
+      webPageId: "",
+      webPageIds: [],
+      webPageReadMode: "auto",
+      retrievalMode: retrievalModeSelect.value,
+    });
+    const renderedAnswer = renderAssistantPayload(payload);
+    state.history.push({ role: "assistant", content: renderedAnswer });
+    state.assistanceBriefShown = true;
+  } catch (error) {
+    const lastMsg = chatLog.querySelector(".msg:last-child .msg-body p");
+    if (lastMsg) {
+      lastMsg.textContent = error.message;
+    }
+    state.assistanceBriefShown = true;
+  }
+}
+
 async function resetSessionOnServer() {
   const response = await fetch("/api/session/reset", {
     method: "POST",
@@ -509,6 +589,7 @@ async function resetSessionOnServer() {
 
 function resetConversation(resetServer = false) {
   state.history = [];
+  state.assistanceBriefShown = false;
   chatLog.innerHTML = `
     <div class="msg msg-system">
       <span class="msg-avatar">&#9670;</span>
@@ -516,6 +597,10 @@ function resetConversation(resetServer = false) {
     </div>
   `;
   renderSources([]);
+
+  if (chatModeSelect.value === "assistance") {
+    loadAssistanceToday({ force: true });
+  }
 
   if (resetServer) {
     resetSessionOnServer().catch((error) => {
@@ -762,6 +847,8 @@ chatModeSelect.addEventListener("change", () => {
     selectAllDocuments();
   } else if (chatModeSelect.value === "web-pages") {
     selectAllWebPages();
+  } else if (chatModeSelect.value === "assistance") {
+    loadAssistanceToday();
   }
 });
 
@@ -872,7 +959,7 @@ chatForm.addEventListener("submit", async (event) => {
   const question = chatInput.value.trim();
   if (!question) return;
   const chatMode = chatModeSelect.value;
-  const isDebugSearch = debugSearchToggle.checked;
+  const isDebugSearch = chatMode !== "assistance" && debugSearchToggle.checked;
 
   if (chatMode === "full-document" && !state.documents.length) {
     renderChatMessage("assistant", "Please upload at least one document first before using Full document mode.");
@@ -914,7 +1001,9 @@ chatForm.addEventListener("submit", async (event) => {
           ? "Reading the selected web pages..."
           : chatMode === "full-document"
             ? "Reading the full document..."
-            : "Generating answer...";
+            : chatMode === "assistance"
+              ? "DS đang xem việc hôm nay..."
+              : "Generating answer...";
 
     renderChatMessage("assistant", loadingText);
 
@@ -964,39 +1053,13 @@ chatForm.addEventListener("submit", async (event) => {
         state.history.push({ role: "assistant", content: streamedText });
       }
     } else {
-      const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
-      const response = await fetch(requestPath, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || "Chat failed.");
-      }
-
-      const renderedAnswer = extractRenderedAnswer(payload);
-      const lastMsgBody = chatLog.querySelector(".msg:last-child .msg-body");
-      const lastMsg = lastMsgBody?.querySelector("p");
-      if (lastMsgBody) {
-        if (isDebugSearch) {
-          lastMsgBody.innerHTML = `<p>${escapeHtml(buildSearchDebugSummary(payload))}</p>`;
-        } else if (payload.structured || (typeof payload.rawModelText === "string" && payload.rawModelText.trim())) {
-          lastMsgBody.innerHTML = buildStructuredAnswerHtml(payload);
-        } else if (lastMsg) {
-          lastMsg.textContent = renderedAnswer;
-        } else {
-          lastMsgBody.innerHTML = `<p>${escapeHtml(renderedAnswer)}</p>`;
-        }
-      }
+      const payload = await requestChatCompletion(requestBody, { isDebugSearch });
+      const renderedAnswer = renderAssistantPayload(payload, { isDebugSearch });
 
       if (!isDebugSearch) {
         state.history.push({ role: "user", content: question });
         state.history.push({ role: "assistant", content: renderedAnswer });
       }
-
-      renderSources(payload.chunks);
     }
   } catch (error) {
     const lastMsg = chatLog.querySelector(".msg:last-child .msg-body p");

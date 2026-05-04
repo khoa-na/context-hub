@@ -10,6 +10,7 @@ const { ensureSession, rotateSession, writeSession } = require("../lib/session")
 const { parseMultipartFile } = require("../lib/uploads");
 const { convertToMarkdown, convertUploadToMarkdown, slugify, repairTextEncoding } = require("../lib/markdown");
 const { readIndex, writeIndex, saveEnvValue } = require("../lib/storage");
+const { getTodayAssistanceBrief } = require("../lib/assistance");
 const {
   renderWebPageToMarkdown,
   saveSessionWebPage,
@@ -31,6 +32,7 @@ const {
   serializeChunk,
   answerWithFullDocument,
   answerWithWebPages,
+  answerWithAssistance,
   callGemini,
   callGeminiStream,
 } = require("../services/chat");
@@ -243,6 +245,8 @@ async function handleChat(req, res) {
     result = await answerWithFullDocument({ question, history: session.history, apiKey, apiKeys, model, documentId, documentIds });
   } else if (chatMode === "web-pages") {
     result = await answerWithWebPages({ question, history: session.history, apiKey, apiKeys, model, session, webPageId, webPageIds, webPageReadMode });
+  } else if (chatMode === "assistance") {
+    result = await answerWithAssistance({ question, history: session.history, apiKey, apiKeys, model });
   } else {
     result = await callGemini({ question, history: session.history, apiKey, apiKeys, model, tenantId: "default", retrievalMode, session });
   }
@@ -270,6 +274,11 @@ async function handleChat(req, res) {
     schemaPreset: result.schemaPreset || null,
     chunks: result.chunks.map(serializeChunk),
   });
+}
+
+async function handleAssistanceToday(_req, res) {
+  const brief = await getTodayAssistanceBrief();
+  return sendJson(res, 200, brief);
 }
 
 function buildWebPageSummaryPrompt({ question, page, markdown }) {
@@ -614,6 +623,7 @@ module.exports = {
   handleCreateWebPage,
   handleWebPages,
   handleDeleteWebPage,
+  handleAssistanceToday,
   handleChat,
   handleChatStream,
   handleSearch,

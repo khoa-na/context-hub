@@ -215,3 +215,7 @@ marimo/_lsp/
 __marimo__/
 
 wiki/
+
+# Local assistant/planning notes
+CLAUDE.md
+MindOS_5KB_DS.md
