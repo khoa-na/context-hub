@@ -312,9 +312,12 @@ async function hybridSearch(query, tenantId, apiKey, topK = 5, options = {}) {
 }
 
 async function removeDocumentChunks(docId) {
+  const id = String(docId);
+  if (!/^[a-z0-9_-]+$/i.test(id)) {
+    throw new Error("Invalid document ID.");
+  }
   const table = await getTable();
-  const safeDocId = String(docId).replace(/'/g, "\\'");
-  await table.delete(`docId = '${safeDocId}'`);
+  await table.delete(`docId = '${id}'`);
   await refreshTable();
 }
 

@@ -1,4 +1,5 @@
 const config = require("../config");
+const { PROMPT_HISTORY_LIMIT } = require("../constants");
 const { semanticSearch, bm25Search, hybridSearch } = require("../db");
 const { getApiKeyForProvider, getProviderForModel } = require("../lib/model-providers");
 const { loadWikiContext, loadAllDocumentsWithMarkdown } = require("../lib/storage");
@@ -13,6 +14,7 @@ const {
 } = require("../lib/full-document-schemas");
 const {
   buildGeminiSystemInstruction,
+  generateGeminiAnswerStream,
   buildFullDocumentSystemInstruction,
   buildDocumentSliceSystemInstruction,
   buildDocumentReduceSystemInstruction,
@@ -412,7 +414,7 @@ async function selectSemanticWebPageExcerpts({ pages, question, schemaPreset, ap
 
 function buildFocusedWebPagesPrompt({ question, history, documents, excerpts, schemaInstruction }) {
   const historyLines = (history || [])
-    .slice(-16)
+    .slice(-PROMPT_HISTORY_LIMIT)
     .map((entry) => `[${entry.role === "assistant" ? "Assistant" : "User"}]: ${entry.content}`)
     .join("\n");
 
@@ -497,7 +499,7 @@ function buildWebPageScanPrompt({ question, documents, sliceText, sliceIndex, to
 
 function buildWebPageScanSynthesisPrompt({ question, history, documents, scanNotes, schemaInstruction }) {
   const historyLines = (history || [])
-    .slice(-16)
+    .slice(-PROMPT_HISTORY_LIMIT)
     .map((entry) => `[${entry.role === "assistant" ? "Assistant" : "User"}]: ${entry.content}`)
     .join("\n");
 
@@ -1370,6 +1372,76 @@ async function callGemini({ question, history, apiKey: legacyApiKey, apiKeys = {
   };
 }
 
+async function callGeminiStream({ question, history, apiKey: legacyApiKey, apiKeys = {}, model, tenantId = "default", retrievalMode = "hybrid" }) {
+  const provider = getProviderForModel(model);
+  const apiKey = getApiKeyForProvider({ provider, apiKeys, legacyApiKey });
+  const embeddingApiKey = getApiKeyForProvider({ provider: "google", apiKeys, legacyApiKey });
+  if (!apiKey) {
+    throw new Error(`Missing ${provider} API key. Add it to the environment or paste a key into the app.`);
+  }
+
+  const wikiContext = await loadWikiContext(tenantId);
+  const selectedRetrievalMode = normalizeRetrievalMode(retrievalMode);
+  const searchRetrievalMode = retrievalUsesEmbedding(selectedRetrievalMode) && !embeddingApiKey
+    ? "bm25"
+    : selectedRetrievalMode;
+
+  let initialChunks = [];
+  try {
+    initialChunks = await retrieveRelevantChunks({
+      question, tenantId, apiKey: embeddingApiKey, retrievalMode: searchRetrievalMode,
+      topK: config.RERANK_FETCH_COUNT || 50,
+    });
+  } catch (err) {
+    console.error(`${searchRetrievalMode} search failed, falling back to full context:`, err.message);
+  }
+
+  let ragChunks = initialChunks;
+  try {
+    const result = await llmRerankChunks({
+      question, chunks: initialChunks, topK: config.RERANK_TOP_K || 10, apiKey, provider, model,
+    });
+    if (result.none && initialChunks.length < ((config.RERANK_FETCH_COUNT || 50) * 2)) {
+      const moreChunks = await retrieveRelevantChunks({
+        question, tenantId, apiKey: embeddingApiKey, retrievalMode: searchRetrievalMode,
+        topK: (config.RERANK_FETCH_COUNT || 50) * 2,
+      }).then((all) => all.slice(initialChunks.length)).catch(() => []);
+      if (moreChunks.length) {
+        const combined = [...initialChunks, ...moreChunks];
+        const retry = await llmRerankChunks({ question, chunks: combined, topK: config.RERANK_TOP_K || 10, apiKey, provider, model });
+        ragChunks = retry.chunks;
+      } else {
+        ragChunks = result.chunks;
+      }
+    } else {
+      ragChunks = result.chunks;
+    }
+  } catch (err) {
+    console.warn(`[re-rank] Skipped: ${err.message}`);
+  }
+
+  let ragContext = "";
+  if (ragChunks.length > 0) {
+    ragContext = ragChunks
+      .map((chunk) => `[${chunk.id}] (${chunk.title || chunk.filename})\n${chunk.content}`)
+      .join("\n\n---\n\n");
+  } else {
+    const uploadedDocs = await loadAllDocumentsWithMarkdown();
+    ragContext = uploadedDocs.map((doc) => `### ${doc.title}\n${doc.markdown}`).join("\n\n");
+  }
+
+  ragContext = truncateToTokenBudget(ragContext, config.RAG_TOKEN_BUDGET);
+  const fullContext = [wikiContext, ragContext].filter(Boolean).join("\n\n");
+  if (!fullContext.trim()) {
+    throw new Error("No documents are available yet. Please upload a file or add .md files to wiki/default/");
+  }
+
+  const prompt = buildGeminiUserPrompt({ question, contextText: fullContext, history });
+  const stream = generateGeminiAnswerStream({ apiKey, provider, model, maxOutputTokens: 700, systemInstruction: buildGeminiSystemInstruction(), prompt });
+
+  return { chunks: ragChunks, retrievalMode: searchRetrievalMode, stream };
+}
+
 module.exports = {
   normalizeRetrievalMode,
   retrievalUsesEmbedding,
@@ -1380,4 +1452,5 @@ module.exports = {
   answerWithFullDocument,
   answerWithWebPages,
   callGemini,
+  callGeminiStream,
 };

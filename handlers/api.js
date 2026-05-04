@@ -21,6 +21,7 @@ const { indexDocumentContent, rebuildAllIndexes } = require("../services/indexin
 const {
   buildFullDocumentSystemInstruction,
   generateStructuredGeminiAnswer,
+  normalizeModelText,
 } = require("../services/gemini");
 const {
   normalizeChatMode,
@@ -31,6 +32,7 @@ const {
   answerWithFullDocument,
   answerWithWebPages,
   callGemini,
+  callGeminiStream,
 } = require("../services/chat");
 
 async function handleUpload(req, res) {
@@ -552,6 +554,59 @@ async function handleSaveKey(req, res) {
   return sendJson(res, 200, { saved: true, provider });
 }
 
+async function handleChatStream(req, res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  function writeEvent(data) {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  }
+
+  try {
+    const body = await parseJson(req);
+    const session = await ensureSession(req, res);
+    const question = String(body.question || "").trim();
+    const apiKey = String(body.apiKey || "").trim();
+    const apiKeys = body.apiKeys && typeof body.apiKeys === "object" ? body.apiKeys : {};
+    const model = String(body.model || "").trim();
+    const retrievalMode = normalizeRetrievalMode(String(body.retrievalMode || "hybrid").trim().toLowerCase());
+
+    if (!question) {
+      writeEvent({ type: "error", error: "question is required." });
+      res.end();
+      return;
+    }
+
+    const { chunks, retrievalMode: actualRetrievalMode, stream } = await callGeminiStream({
+      question, history: session.history, apiKey, apiKeys, model,
+      tenantId: "default", retrievalMode,
+    });
+
+    writeEvent({ type: "start", chunks: chunks.map(serializeChunk), retrievalMode: actualRetrievalMode });
+
+    let fullText = "";
+    for await (const token of stream) {
+      fullText += token;
+      writeEvent({ type: "token", text: token });
+    }
+
+    const answer = normalizeModelText(fullText) || fullText;
+    session.history.push({ role: "user", content: question }, { role: "assistant", content: answer });
+    await writeSession(session);
+
+    writeEvent({ type: "done", sessionId: session.id });
+    res.end();
+  } catch (err) {
+    console.error(err);
+    writeEvent({ type: "error", error: err.message || "Internal server error." });
+    res.end();
+  }
+}
+
 module.exports = {
   handleUpload,
   handleDocuments,
@@ -560,6 +615,7 @@ module.exports = {
   handleWebPages,
   handleDeleteWebPage,
   handleChat,
+  handleChatStream,
   handleSearch,
   handleSessionReset,
   handleReindex,
