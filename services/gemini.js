@@ -1,7 +1,8 @@
 const config = require("../config");
-const { callGoogleGenAI } = require("../lib/google-genai-client");
-const { callDashScopeChatCompletion } = require("../lib/dashscope-client");
+const { callGoogleGenAI, callGoogleGenAIStream } = require("../lib/google-genai-client");
+const { callDashScopeChatCompletion, callDashScopeStream } = require("../lib/dashscope-client");
 const { getDefaultModelForProvider, getProviderForModel } = require("../lib/model-providers");
+const { PROMPT_HISTORY_LIMIT } = require("../constants");
 
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
@@ -380,7 +381,7 @@ function buildDocumentSliceSystemInstruction() {
 
 function buildGeminiUserPrompt({ question, contextText, history }) {
   const historyLines = (history || [])
-    .slice(-16)
+    .slice(-PROMPT_HISTORY_LIMIT)
     .map((entry) => `[${entry.role === "assistant" ? "Assistant" : "User"}]: ${entry.content}`)
     .join("\n");
 
@@ -411,7 +412,7 @@ function buildDocumentsMarkdownBlock(documents) {
 
 function buildDirectFullDocumentPrompt({ question, history, documents, schemaInstruction }) {
   const historyLines = (history || [])
-    .slice(-16)
+    .slice(-PROMPT_HISTORY_LIMIT)
     .map((entry) => `[${entry.role === "assistant" ? "Assistant" : "User"}]: ${entry.content}`)
     .join("\n");
 
@@ -512,7 +513,7 @@ function buildCompressedSummariesPrompt({ question, documents, summaries, batchI
 
 function buildFullDocumentSynthesisPrompt({ question, history, documents, sliceSummaries, documentSummaries, schemaInstruction }) {
   const historyLines = (history || [])
-    .slice(-16)
+    .slice(-PROMPT_HISTORY_LIMIT)
     .map((entry) => `[${entry.role === "assistant" ? "Assistant" : "User"}]: ${entry.content}`)
     .join("\n");
   const summaries = documentSummaries || sliceSummaries || [];
@@ -611,6 +612,18 @@ async function postModelGenerateContent({
     responseMimeType,
     responseJsonSchema,
   });
+}
+
+async function* generateGeminiAnswerStream({ apiKey, provider: requestedProvider, model: requestedModel, prompt, maxOutputTokens = 700, systemInstruction }) {
+  const { model, provider } = resolveGenerationTarget({ model: requestedModel, provider: requestedProvider });
+  const sysInstruction = withProviderSystemInstruction({ provider, model, systemInstruction: systemInstruction || buildGeminiSystemInstruction() });
+
+  if (provider === "dashscope") {
+    yield* callDashScopeStream({ apiKey, model, prompt, maxOutputTokens, systemInstruction: sysInstruction });
+    return;
+  }
+
+  yield* callGoogleGenAIStream({ apiKey, model, prompt, maxOutputTokens, systemInstruction: sysInstruction });
 }
 
 async function generateGeminiAnswer({ apiKey, provider: requestedProvider, model: requestedModel, prompt, maxOutputTokens = 700, systemInstruction = buildGeminiSystemInstruction() }) {
@@ -829,6 +842,7 @@ async function generateChunkTitles(chunks, apiKey) {
 }
 
 module.exports = {
+  normalizeModelText,
   buildGeminiSystemInstruction,
   buildFullDocumentSystemInstruction,
   buildDocumentSliceSystemInstruction,
@@ -842,6 +856,7 @@ module.exports = {
   buildCompressedSummariesPrompt,
   buildFullDocumentSynthesisPrompt,
   generateGeminiAnswer,
+  generateGeminiAnswerStream,
   generateStructuredGeminiAnswer,
   generateChunkTitles,
   postGeminiGenerateContent,

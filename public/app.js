@@ -848,6 +848,24 @@ chatInput.addEventListener("keydown", (event) => {
   }
 });
 
+async function* parseSSEStream(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      try { yield JSON.parse(line.slice(6)); } catch {}
+    }
+  }
+}
+
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
@@ -885,65 +903,101 @@ chatForm.addEventListener("submit", async (event) => {
 
   try {
     const apiKeys = getApiKeys();
-
-    const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
-
     const webPageReadMode = webPageReadModeSelect?.value || "auto";
-    const loadingText = chatMode === "web-pages" && webPageReadMode === "full-scan"
-      ? "Scanning every selected web page chunk..."
-      : chatMode === "web-pages"
-        ? "Reading the selected web pages..."
-        : chatMode === "full-document"
-          ? "Reading the full document..."
-          : "Generating answer...";
+    const useStreaming = chatMode === "qa" && !isDebugSearch;
 
-    renderChatMessage("assistant", isDebugSearch ? "Searching..." : loadingText);
+    const loadingText = isDebugSearch
+      ? "Searching..."
+      : chatMode === "web-pages" && webPageReadMode === "full-scan"
+        ? "Scanning every selected web page chunk..."
+        : chatMode === "web-pages"
+          ? "Reading the selected web pages..."
+          : chatMode === "full-document"
+            ? "Reading the full document..."
+            : "Generating answer...";
 
-    const response = await fetch(requestPath, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question,
-        history: state.history,
-        apiKey: apiKeys.google,
-        apiKeys,
-        model: state.selectedModel,
-        chatMode,
-        documentId: chatMode === "full-document" ? (selectedDocumentIds[0] || "") : "",
-        documentIds: selectedDocumentIds,
-        webPageId: chatMode === "web-pages" ? (selectedWebPageIds[0] || "") : "",
-        webPageIds: selectedWebPageIds,
-        webPageReadMode: chatMode === "web-pages" ? webPageReadMode : "auto",
-        retrievalMode: retrievalModeSelect.value,
-      }),
-    });
+    renderChatMessage("assistant", loadingText);
 
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "Chat failed.");
-    }
+    const requestBody = {
+      question,
+      history: state.history,
+      apiKey: apiKeys.google,
+      apiKeys,
+      model: state.selectedModel,
+      chatMode,
+      documentId: chatMode === "full-document" ? (selectedDocumentIds[0] || "") : "",
+      documentIds: selectedDocumentIds,
+      webPageId: chatMode === "web-pages" ? (selectedWebPageIds[0] || "") : "",
+      webPageIds: selectedWebPageIds,
+      webPageReadMode: chatMode === "web-pages" ? webPageReadMode : "auto",
+      retrievalMode: retrievalModeSelect.value,
+    };
 
-    const renderedAnswer = extractRenderedAnswer(payload);
-    const lastMsgBody = chatLog.querySelector(".msg:last-child .msg-body");
-    const lastMsg = lastMsgBody?.querySelector("p");
-    if (lastMsgBody) {
-      if (isDebugSearch) {
-        lastMsgBody.innerHTML = `<p>${escapeHtml(buildSearchDebugSummary(payload))}</p>`;
-      } else if (payload.structured || (typeof payload.rawModelText === "string" && payload.rawModelText.trim())) {
-        lastMsgBody.innerHTML = buildStructuredAnswerHtml(payload);
-      } else if (lastMsg) {
-        lastMsg.textContent = renderedAnswer;
-      } else {
-        lastMsgBody.innerHTML = `<p>${escapeHtml(renderedAnswer)}</p>`;
+    if (useStreaming) {
+      const response = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok || !response.body) {
+        const errPayload = await response.json().catch(() => ({}));
+        throw new Error(errPayload.error || "Streaming request failed.");
       }
-    }
 
-    if (!isDebugSearch) {
-      state.history.push({ role: "user", content: question });
-      state.history.push({ role: "assistant", content: renderedAnswer });
-    }
+      const msgBody = chatLog.querySelector(".msg:last-child .msg-body");
+      const msgPara = msgBody?.querySelector("p");
+      let streamedText = "";
 
-    renderSources(payload.chunks);
+      for await (const event of parseSSEStream(response)) {
+        if (event.type === "error") throw new Error(event.error || "Streaming error.");
+        if (event.type === "start") renderSources(event.chunks || []);
+        if (event.type === "token") {
+          streamedText += event.text;
+          if (msgPara && streamedText) msgPara.textContent = streamedText;
+          chatLog.scrollTop = chatLog.scrollHeight;
+        }
+      }
+
+      if (streamedText) {
+        state.history.push({ role: "user", content: question });
+        state.history.push({ role: "assistant", content: streamedText });
+      }
+    } else {
+      const requestPath = isDebugSearch ? "/api/search" : "/api/chat";
+      const response = await fetch(requestPath, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Chat failed.");
+      }
+
+      const renderedAnswer = extractRenderedAnswer(payload);
+      const lastMsgBody = chatLog.querySelector(".msg:last-child .msg-body");
+      const lastMsg = lastMsgBody?.querySelector("p");
+      if (lastMsgBody) {
+        if (isDebugSearch) {
+          lastMsgBody.innerHTML = `<p>${escapeHtml(buildSearchDebugSummary(payload))}</p>`;
+        } else if (payload.structured || (typeof payload.rawModelText === "string" && payload.rawModelText.trim())) {
+          lastMsgBody.innerHTML = buildStructuredAnswerHtml(payload);
+        } else if (lastMsg) {
+          lastMsg.textContent = renderedAnswer;
+        } else {
+          lastMsgBody.innerHTML = `<p>${escapeHtml(renderedAnswer)}</p>`;
+        }
+      }
+
+      if (!isDebugSearch) {
+        state.history.push({ role: "user", content: question });
+        state.history.push({ role: "assistant", content: renderedAnswer });
+      }
+
+      renderSources(payload.chunks);
+    }
   } catch (error) {
     const lastMsg = chatLog.querySelector(".msg:last-child .msg-body p");
     if (lastMsg) lastMsg.textContent = error.message;
