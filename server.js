@@ -7,6 +7,7 @@ const config = require("./config");
 const { MIME_TYPES, PUBLIC_DIR } = require("./constants");
 const { sendJson } = require("./lib/http");
 const { ensureStorage, cleanupSessionWebStorage } = require("./lib/storage");
+const { closeBrowser } = require("./lib/web-pages");
 const { autoIndexUnindexedDocs } = require("./services/indexing");
 const {
   handleUpload,
@@ -152,7 +153,7 @@ async function start() {
   const server = http.createServer(router);
   async function shutdown() {
     try {
-      await cleanupSessionWebStorage();
+      await Promise.all([cleanupSessionWebStorage(), closeBrowser()]);
     } catch {}
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 1500).unref();
