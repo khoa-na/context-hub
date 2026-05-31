@@ -162,6 +162,33 @@ npm start
 
 If `HOST=0.0.0.0`, startup logs will also print LAN URLs such as `http://192.168.x.x:3000`.
 
+## Run with Docker
+
+The image is based on the official Playwright image, so Chromium (used for web-page
+rendering) and its system dependencies are already included.
+
+1. Build the image:
+
+```bash
+docker build -t context-hub .
+```
+
+2. Run it, passing your API keys as environment variables and persisting runtime
+   data with a volume:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e GEMINI_API_KEY=your_gemini_key \
+  -e DASHSCOPE_API_KEY=your_dashscope_key \
+  -v "$(pwd)/data:/app/data" \
+  context-hub
+```
+
+3. Open `http://localhost:3000`.
+
+Runtime data (uploaded documents, LanceDB, sessions) lives under `/app/data`; mount a
+volume there to keep it across container restarts.
+
 ## UI Modes
 
 ### Q&A
