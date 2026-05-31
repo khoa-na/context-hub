@@ -8,7 +8,8 @@
     "start": "node server.js",
     "test": "node --test",
     "test:watch": "node --test --watch",
-    "test:coverage": "node --test --experimental-test-coverage"
+    "test:coverage": "node --test --experimental-test-coverage",
+    "eval": "node eval/run.js"
   },
   "dependencies": {
     "@google/genai": "^1.50.1",

@@ -17,6 +17,9 @@ coverage/
 .nyc_output/
 *.lcov
 
+# Eval harness isolated index (temporary)
+eval/.eval-lancedb/
+
 # Logs
 *.log
 npm-debug.log*
