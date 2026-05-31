@@ -1,142 +1,178 @@
 # context-hub
 
 [![CI](https://github.com/khoa-na/context-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/khoa-na/context-hub/actions/workflows/ci.yml)
+[![Node.js](https://img.shields.io/badge/Node.js-20%20%7C%2022-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-Document Q&A app powered by Gemini, DashScope/Qwen, LanceDB, and a small vanilla JS UI.
+A self-hosted **document Q&A platform** built around a production-style **Retrieval-Augmented Generation (RAG)** pipeline: hybrid search, parent–child chunking, LLM reranking, and map-reduce synthesis for documents that exceed the model context window.
 
-This branch includes:
-- modularized server-side code (`handlers/`, `services/`, `lib/`)
-- retrieval-based Q&A across uploaded documents
-- full-document mode for one or more selected documents
-- session-scoped web page import and Q&A
-- streaming Q&A responses for the default retrieval chat mode
+Upload files (or import web pages), then ask questions across everything you've added. Answers are grounded in retrieved context with citations and follow-up suggestions. It supports both **Google (Gemini / Gemma)** and **DashScope (Qwen)** models behind a single provider-agnostic layer.
 
-## Features
+> Built with **zero web framework** — plain Node.js HTTP, Server-Sent Events, and a dependency-free vanilla-JS frontend — to keep the focus on the retrieval and orchestration logic.
 
-- Upload one or more files (`.txt`, `.md`, `.json`, `.csv`, `.tsv`, `.html`, `.xml`, `.docx`, source code) and convert them to Markdown
-- Upload `.md` / `.txt` files into `wiki/default/` as always-on context
-- Retrieval modes: `hybrid`, `semantic`, `bm25`
-- Parent-child retrieval: search on child chunks, answer with parent section context
-- Gemini-generated chunk titles for better contextual embeddings
-- Model-assisted reranking over retrieved chunks before final answer generation
-- Full-document mode for up to 5 selected documents at a time
-- Full-document and web-page answers can return structured payloads with citations and follow-up questions
-- Schema-aware synthesis presets for financial, operational, risk, and generic report questions
-- Chat model selector with Gemini and DashScope/Qwen options
-- Paste one or more public web page URLs, render them with Chromium, then ask about selected pages in Web pages mode with fast, automatic, or full-scan reading
-- Cookie-backed local sessions with preserved chat history and session web pages
-- Retrieval-only debug mode via `/api/search`
-- Save Gemini and DashScope API keys from the UI into `.env`
-- LAN-friendly startup logging when the server is bound outside localhost
+---
 
-## Core Flows
+## Demo
 
-### Indexing flow
+<!--
+  Record a ~15s screen capture (upload a doc → ask a question → watch the
+  streamed, cited answer), export it as docs/demo.gif, then uncomment the line
+  below. Recording instructions: docs/RECORDING.md
+-->
+<!-- ![context-hub demo](docs/demo.gif) -->
 
-```text
-Upload file
-  -> convert to Markdown
-  -> split into parent sections and child chunks
-  -> optionally rewrite chunk titles with Gemini
-  -> embed "title: child_text"
-  -> store in LanceDB
-  -> create FTS + vector indexes
-```
+> 🎬 _Demo GIF placeholder — add `docs/demo.gif` and uncomment the image tag above. See [docs/RECORDING.md](docs/RECORDING.md)._
 
-### Retrieval Q&A flow
+---
 
-```text
-Question
-  -> retrieve with hybrid / semantic / bm25
-  -> rerank retrieved chunks with the selected chat model
-  -> return parent section context for matched child chunks
-  -> add wiki/default/*.md context
-  -> truncate context to token budget
-  -> send prompt to the selected Gemini or DashScope/Qwen chat model
-```
+## Why this project is interesting
 
-### Full-document flow
+Most "chat with your docs" demos stop at *embed → top-k → prompt*. This one implements the techniques that actually move retrieval quality:
 
-```text
-Question + selected documents
-  -> select a schema focus preset from the question
-  -> load full Markdown for selected docs
-  -> if content fits budget, send directly to the selected chat model
-  -> otherwise split into slices
-  -> summarize each slice
-  -> synthesize a final whole-document answer
-```
+- **Hybrid retrieval with Reciprocal Rank Fusion (RRF)** — combines BM25 (lexical) and dense semantic search, then merges their rankings instead of relying on either alone.
+- **Parent–child chunking** — search runs over small child chunks for precision, but the model answers from the larger parent section for context.
+- **Contextual embeddings** — each chunk is embedded as `"<title>: <text>"` so its vector carries section context.
+- **LLM-based reranking** — the chat model re-scores retrieved candidates before answering, with an automatic "fetch more" pass when nothing relevant is found.
+- **Map-reduce synthesis** — documents larger than the context window are sliced, summarized, compressed, and synthesized, so full-document analysis still works at scale.
+- **Provider-agnostic LLM layer** — Gemini/Gemma and Qwen behind one interface, with layered fallbacks for structured (JSON) output.
+- **Hardened web scraping** — Chromium rendering with **SSRF protection** (rejects localhost/private networks, validated on every navigation) and a content-extraction heuristic that strips boilerplate.
 
-### Web pages flow
-
-```text
-Public URLs
-  -> validate as public http/https URLs
-  -> render with Playwright/Chromium
-  -> extract readable Markdown
-  -> save under the current session
-  -> answer over selected pages with fast, automatic, or full-scan reading
-```
-
-### Debug retrieval flow
-
-```text
-Question
-  -> /api/search
-  -> retrieve with hybrid / semantic / bm25
-  -> return ranked chunks without calling the chat model
-```
+---
 
 ## Architecture
 
-The app is now split by responsibility instead of keeping most logic inside one server file.
+The codebase is split by responsibility rather than piled into one server file.
 
-```text
-server.js                  HTTP bootstrap, static serving, routing
-handlers/api.js            HTTP handlers for upload, chat, search, wiki, reindex
-services/chat.js           Retrieval Q&A and full-document orchestration
-services/gemini.js         Prompt builders and chat model generation calls
-services/indexing.js       Document indexing and reindexing workflow
-db.js                      LanceDB indexing and retrieval (BM25, semantic, hybrid RRF)
-embedding.js               Gemini embedding API client
-lib/markdown.js            File-to-Markdown conversion helpers
-lib/chunking.js            Chunking and document section slicing
-lib/full-document-schemas.js Schema focus presets for synthesis prompts
-lib/web-pages.js           Public URL validation, browser rendering, session web page storage
-lib/storage.js             Local metadata, wiki loading, env persistence
-lib/session.js             Cookie-backed session history storage
-lib/http.js                JSON/body parsing helpers
-lib/uploads.js             Multipart upload parsing
-lib/google-genai-client.js Google GenAI SDK wrapper
-lib/dashscope-client.js    DashScope OpenAI-compatible chat wrapper
-config.js                  Retrieval budgets, embedding settings, local paths
-constants.js               Paths, MIME types, upload/session constants
-public/                    Frontend (HTML, CSS, vanilla JS)
-wiki/default/              Static Markdown always injected into prompts
-data/documents/            Uploaded Markdown files
-data/lancedb/              LanceDB storage
-data/index.json            Local document metadata registry
-data/sessions/             Session history JSON files
-data/session-web/          Rendered web pages for active sessions
+```mermaid
+flowchart TD
+  UI["Browser UI<br/>(vanilla JS, SSE)"] -->|HTTP| Server["server.js<br/>router + static serving"]
+  Server --> Handlers["handlers/api.js<br/>request handlers"]
+
+  subgraph SVC["services/"]
+    Chat["chat.js<br/>retrieval & orchestration"]
+    Gem["gemini.js<br/>prompts & generation"]
+    Idx["indexing.js<br/>index / reindex"]
+  end
+
+  Handlers --> Chat
+  Handlers --> Idx
+  Chat --> Gem
+  Idx --> Gem
+
+  Chat --> DB["db.js<br/>BM25 / semantic / hybrid (RRF)"]
+  Idx --> DB
+  Chat --> Emb["embedding.js"]
+  DB --> Lance[("LanceDB")]
+
+  Gem --> Prov{{"provider layer"}}
+  Emb --> Prov
+  Prov --> Google["Google GenAI<br/>Gemini / Gemma + embeddings"]
+  Prov --> Dash["DashScope<br/>Qwen (OpenAI-compatible)"]
+
+  Chat --> Web["lib/web-pages.js<br/>Playwright + SSRF guard"]
+  Handlers --> Store["lib/storage.js<br/>docs, index.json, wiki"]
+  Handlers --> Sess["lib/session.js<br/>cookie sessions"]
+  Store --> FS[("data/ + wiki/")]
 ```
 
-## Retrieval Notes
+| Module | Responsibility |
+|---|---|
+| `server.js` | HTTP bootstrap, routing, static serving, graceful shutdown |
+| `handlers/api.js` | Request handlers for upload, chat, search, wiki, web pages, reindex |
+| `services/chat.js` | Retrieval Q&A, full-document, and web-page orchestration |
+| `services/gemini.js` | Prompt builders + chat-model generation (with structured-output fallbacks) |
+| `services/indexing.js` | Document indexing and full reindex workflow |
+| `db.js` | LanceDB indexing + BM25 / semantic / hybrid (RRF) retrieval |
+| `embedding.js` | Gemini embedding client (batched, with backoff) |
+| `lib/chunking.js` | Heading-aware chunking and document slicing |
+| `lib/markdown.js` | File → Markdown conversion + encoding repair |
+| `lib/web-pages.js` | URL validation (SSRF), Chromium rendering, session page storage |
+| `lib/model-providers.js` | Provider/model resolution and API-key precedence |
+| `lib/full-document-schemas.js` | Schema focus presets (financial / operational / risk / generic) |
+| `lib/storage.js` · `lib/session.js` | Local metadata + wiki; cookie-backed sessions |
 
-| Technique | Where | Purpose |
-|---|---|---|
-| Hybrid retrieval | `db.js` | Combine BM25 and semantic candidates |
-| RRF merging | `db.js` | Merge BM25 and semantic ranks with Reciprocal Rank Fusion |
-| Contextual chunking | `db.js` | Embed `title: chunk_text` so vectors carry section context |
-| Parent-child retrieval | `db.js` / `services/chat.js` | Search by child chunk, answer with parent section context |
-| Model reranking | `services/chat.js` | Ask the selected chat model to choose the most relevant retrieved chunks |
-| Gemini title rewriting | `services/gemini.js` | Replace generic headings with more specific chunk titles |
-| Wiki injection | `lib/storage.js` / `services/chat.js` | Always include static wiki Markdown in final context |
-| Schema focus presets | `lib/full-document-schemas.js` | Steer full-document and web-page synthesis toward financial, operational, risk, or generic fields |
+---
 
-## Run Locally
+## How it works
 
-1. Create a `.env` file in the project root.
-2. Add the variables you need:
+### Indexing
+
+```mermaid
+flowchart LR
+  U["Upload file"] --> M["Convert to Markdown"]
+  M --> C["Split into parent sections<br/>+ child chunks"]
+  C --> T["Rewrite chunk titles<br/>(LLM, optional)"]
+  T --> E["Embed 'title: text'"]
+  E --> S["Store in LanceDB"]
+  S --> I["Build FTS + vector indexes"]
+```
+
+### Retrieval Q&A
+
+```mermaid
+flowchart LR
+  Q["Question"] --> R{"Retrieval mode"}
+  R -->|hybrid| H["BM25 + semantic<br/>→ RRF merge"]
+  R -->|semantic| V["Vector search"]
+  R -->|bm25| B["Full-text search"]
+  H --> RR["LLM rerank<br/>(+ fetch-more if none)"]
+  V --> RR
+  B --> RR
+  RR --> P["Expand to parent sections"]
+  P --> W["+ always-on wiki context"]
+  W --> Tr["Truncate to token budget"]
+  Tr --> G["Answer (streamed via SSE)"]
+```
+
+### Full-document (map-reduce)
+
+```mermaid
+flowchart LR
+  Sel["Question + selected docs<br/>(up to 5)"] --> Fit{"Fits token budget?"}
+  Fit -->|yes| Direct["Answer directly"]
+  Fit -->|no| Slice["Slice each document"]
+  Slice --> Sum["Summarize slices"]
+  Sum --> Comp["Compress summaries<br/>(repeat if needed)"]
+  Comp --> Syn["Synthesize final answer"]
+```
+
+---
+
+## Features
+
+- Upload `.txt`, `.md`, `.json`, `.csv`, `.tsv`, `.html`, `.xml`, `.docx`, and source-code files → converted to Markdown and indexed.
+- Three retrieval modes: **hybrid**, **semantic**, **bm25**.
+- **Full-document mode** for up to 5 selected documents (summary, synthesis, cross-document comparison).
+- **Web-pages mode**: paste public URLs, render with Chromium, then ask about selected pages with `Auto` / `Fast` / `Full scan` read depth.
+- **Wiki context**: drop `.md` / `.txt` into `wiki/default/` to always inject as context.
+- **Assistance mode**: an internal work-assistant ("DS") that reads a local task list and produces a daily brief.
+- Structured answers with **citations + follow-up questions**, schema-aware synthesis presets, and a model selector (Gemini / Gemma / Qwen).
+- Streaming answers over **Server-Sent Events**, cookie-backed sessions, and a retrieval-only debug endpoint (`/api/search`).
+
+---
+
+## Tech stack
+
+**Runtime:** Node.js (built-in `http`, `fs`, SSE) · **Vector DB:** LanceDB · **LLMs:** Google GenAI (Gemini / Gemma + embeddings), DashScope/Qwen (OpenAI-compatible) · **Scraping:** Playwright (Chromium) · **Parsing:** Busboy (multipart), Mammoth (`.docx`) · **Frontend:** vanilla HTML/CSS/JS · **Tests:** Node built-in test runner · **CI:** GitHub Actions · **Container:** Docker.
+
+---
+
+## Quickstart
+
+### Local
+
+```bash
+# 1. Configure environment
+cp .env.example .env        # then fill in your keys
+
+# 2. Install and run
+npm install
+npm start
+```
+
+Open `http://localhost:3000`. If `HOST=0.0.0.0`, startup logs also print LAN URLs (e.g. `http://192.168.x.x:3000`).
+
+`.env` example:
 
 ```env
 GEMINI_API_KEY=your_gemini_key
@@ -146,37 +182,13 @@ PORT=3000
 HOST=0.0.0.0
 ```
 
-3. Install dependencies:
+### Docker
 
-```bash
-npm install
-```
-
-4. Start the server:
-
-```bash
-npm start
-```
-
-5. Open `http://localhost:3000`.
-
-If `HOST=0.0.0.0`, startup logs will also print LAN URLs such as `http://192.168.x.x:3000`.
-
-## Run with Docker
-
-The image is based on the official Playwright image, so Chromium (used for web-page
-rendering) and its system dependencies are already included.
-
-1. Build the image:
+The image is based on the official Playwright image, so Chromium and its system dependencies are already included.
 
 ```bash
 docker build -t context-hub .
-```
 
-2. Run it, passing your API keys as environment variables and persisting runtime
-   data with a volume:
-
-```bash
 docker run --rm -p 3000:3000 \
   -e GEMINI_API_KEY=your_gemini_key \
   -e DASHSCOPE_API_KEY=your_dashscope_key \
@@ -184,121 +196,85 @@ docker run --rm -p 3000:3000 \
   context-hub
 ```
 
-3. Open `http://localhost:3000`.
+Runtime data (uploaded docs, LanceDB, sessions) lives under `/app/data` — mount a volume there to persist it.
 
-Runtime data (uploaded documents, LanceDB, sessions) lives under `/app/data`; mount a
-volume there to keep it across container restarts.
+---
 
-## UI Modes
+## Testing
 
-### Q&A
+Unit tests run with Node's built-in test runner (no extra dependencies) and cover the highest-value logic: retrieval fusion helpers, chunking, Markdown conversion, schema-preset selection, SSRF guards, structured-output parsing, and provider/API-key resolution.
 
-- Uses retrieval over indexed chunks
-- Streams answers in the UI via `/api/chat/stream`
-- Uses the selected model to rerank retrieved chunks before answering
-- Returns cited answers grounded in retrieved context when structured output is available
+```bash
+npm test            # run the suite
+npm run test:watch  # watch mode
+npm run test:coverage
+```
 
-### Full document
+CI runs the suite on Node 20.x and 22.x for every push and pull request.
 
-- Works on selected uploaded documents instead of retrieval hits
-- Useful for summaries, synthesis, and cross-document analysis
-- Current server-side limit: 5 selected documents
-- Uses slice-and-synthesize for long documents and returns read-process metadata
+---
 
-### Web pages
-
-- Works on selected pages imported into the current browser session
-- Supports `Auto`, `Fast`, and `Full scan` read depth
-- Uses focused excerpts, semantic excerpt selection when possible, or full page chunk scanning for thorough requests
-
-## API Endpoints
+## API
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/upload` | POST | Upload a file, convert to Markdown, and optionally index it |
-| `/api/web-pages` | GET/POST | List or import public web pages for the current session |
-| `/api/web-pages/:id` | DELETE | Remove a web page from the current session |
-| `/api/chat` | POST | Retrieval Q&A or full-document answer generation |
-| `/api/chat/stream` | POST | Streaming retrieval Q&A with Server-Sent Events |
-| `/api/search` | POST | Retrieval-only debug endpoint |
 | `/api/documents` | GET | List uploaded document metadata |
 | `/api/documents/:id` | DELETE | Delete a document and remove its indexed chunks |
-| `/api/wiki-upload` | POST | Upload a `.md` / `.txt` file into `wiki/default/` |
-| `/api/wiki-list` | GET | List wiki files |
+| `/api/chat` | POST | Retrieval Q&A or full-document / web-page / assistance answer |
+| `/api/chat/stream` | POST | Streaming retrieval Q&A (Server-Sent Events) |
+| `/api/search` | POST | Retrieval-only debug endpoint (no model call) |
+| `/api/web-pages` | GET / POST | List or import public web pages for the session |
+| `/api/web-pages/:id` | DELETE | Remove a web page from the session |
+| `/api/wiki-upload` · `/api/wiki-list` | POST / GET | Manage always-on wiki Markdown |
 | `/api/reindex` | POST | Re-index all documents |
-| `/api/models` | GET | Return the configured chat-model options |
+| `/api/models` | GET | Configured chat-model options |
 | `/api/save-key` | POST | Save provider API keys into `.env` |
 | `/api/session/reset` | POST | Start a fresh local chat session |
 
-## Example Request Shapes
-
-### `/api/chat`
+### Example: `/api/chat`
 
 ```json
 {
-  "question": "Tom tat cac rui ro chinh",
-  "apiKey": "your-gemini-key",
-  "apiKeys": {
-    "google": "your-gemini-key",
-    "dashscope": "your-dashscope-key"
-  },
+  "question": "Tóm tắt các rủi ro chính",
+  "apiKeys": { "google": "your-gemini-key", "dashscope": "your-dashscope-key" },
   "chatMode": "full-document",
   "documentIds": ["doc-a", "doc-b"],
-  "webPageIds": [],
-  "webPageReadMode": "auto",
   "retrievalMode": "hybrid"
 }
 ```
 
-### `/api/chat/stream`
+`/api/chat/stream` uses the same request shape and emits `start` (retrieved chunks), `token` (streamed text), `done`, and `error` events.
 
-Uses the same request shape as `/api/chat` for default Q&A mode and returns Server-Sent Events:
-
-- `start`: retrieved chunks and actual retrieval mode
-- `token`: streamed answer text
-- `done`: session id
-- `error`: error message
+---
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | — | Required for semantic retrieval, indexing, Gemini chat generation, and web-page semantic excerpt selection |
-| `DASHSCOPE_API_KEY` | — | Required for DashScope/Qwen chat generation |
-| `DASHSCOPE_BASE_URL` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | Optional DashScope OpenAI-compatible base URL override |
-| `GEMINI_MODEL` | `gemma-4-31b-it` | Default answer-generation model used by `services/gemini.js` |
-| `WEB_PAGE_FETCH_TIMEOUT_MS` | `30000` | Browser navigation timeout when importing web pages |
-| `WEB_PAGE_NETWORK_IDLE_TIMEOUT_MS` | `8000` | Optional network-idle wait after web page rendering |
-| `WEB_PAGE_SCROLL_DELAY_MS` | `400` | Delay between automatic scroll steps while rendering web pages |
-| `WEB_PAGE_MAX_SCROLL_COUNT` | `30` | Maximum scroll steps while rendering web pages |
+| `GEMINI_API_KEY` | — | Required for embeddings, indexing, and Gemini/Gemma generation |
+| `DASHSCOPE_API_KEY` | — | Required for DashScope/Qwen generation |
+| `DASHSCOPE_BASE_URL` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | OpenAI-compatible base URL override |
+| `GEMINI_MODEL` | `gemma-4-31b-it` | Default Google generation model |
+| `WEB_PAGE_FETCH_TIMEOUT_MS` | `30000` | Browser navigation timeout |
 | `PORT` | `3000` | Server port |
-| `HOST` | `0.0.0.0` | Bind address. Use `127.0.0.1` for local-only access |
+| `HOST` | `0.0.0.0` | Bind address (`127.0.0.1` for local-only) |
 
-Code-level config in `config.js`:
-- `WIKI_TOKEN_BUDGET`
-- `RAG_TOKEN_BUDGET`
-- `FULL_DOCUMENT_DIRECT_CHAR_BUDGET`
-- `FULL_DOCUMENT_MULTI_DIRECT_CHAR_BUDGET`
-- `FULL_DOCUMENT_SLICE_CHAR_BUDGET`
-- `FULL_DOCUMENT_SYNTHESIS_CHAR_BUDGET`
-- `FULL_DOCUMENT_MODEL_CONCURRENCY`
-- `FULL_DOCUMENT_MAX_SLICES_PER_DOC`
-- `RERANK_FETCH_COUNT`
-- `RERANK_TOP_K`
-- `MODELS`
-- `DEFAULT_MODEL`
-- embedding settings and paths
+Code-level tuning lives in `config.js` (token budgets, full-document slicing, rerank fetch counts, embedding settings, model list).
 
-## Notes
+---
 
-- Semantic and hybrid retrieval require Gemini embeddings. If a selected chat model uses DashScope but no Google key is available for embeddings, Q&A falls back to BM25 retrieval.
-- BM25 mode can work without Gemini embeddings, but answer generation still needs the selected provider's API key.
+## Notes & limitations
+
+- Semantic and hybrid retrieval require Gemini embeddings. If a DashScope model is selected but no Google key is available, Q&A falls back to BM25.
 - Wiki files are injected directly into prompts and are not returned by `/api/search`.
-- Web pages are rendered with Playwright/Chromium, saved under `data/session-web/`, selectable in Web pages mode, and cleaned up on server restart/shutdown.
-- Each session keeps up to 8 imported web pages and the last 24 chat history entries.
-- Web pages support `Auto`, `Fast`, and `Full scan` read depth. Full scan reads every page chunk before synthesis, which is slower but reduces missed details on long pages.
-- Web page URLs must be public `http`/`https`; localhost and private-network URLs are rejected.
-- Full-document mode falls back to slice-and-synthesize when selected content exceeds the token budget.
-- Full-document and web-page modes select a schema focus preset from the question, but they still answer in natural language.
-- `data/index.json` is local metadata and may change during testing; document content and LanceDB storage stay local on each machine.
-- Unit tests live in `test/` and run with Node's built-in test runner via `npm test` (also run in CI on every push and pull request).
+- Web pages must be public `http`/`https`; localhost and private-network URLs are rejected. Rendered pages are stored per session and cleaned up on restart.
+- Each session keeps up to 8 web pages and the last 24 chat history entries.
+- `data/index.json` is local metadata; document content and LanceDB storage stay on each machine.
+- There is no authentication layer — intended for local / trusted-network use.
+
+---
+
+## License
+
+[Apache 2.0](LICENSE)
