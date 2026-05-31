@@ -201,6 +201,26 @@ CI runs the suite on Node 20.x and 22.x for every push and pull request.
 
 ---
 
+## Retrieval evaluation
+
+A small evaluation harness measures retrieval quality instead of eyeballing answers. It indexes the four sample quarterly reports into an isolated LanceDB instance and runs a 24-question golden set through each retrieval mode, scoring **document-level** metrics.
+
+```bash
+npm run eval   # requires GEMINI_API_KEY for embeddings
+```
+
+Latest run (24 questions, corpus of 4 reports, top-k = 10):
+
+| Mode | Recall@1 | Recall@3 | MRR | nDCG@3 |
+|---|---:|---:|---:|---:|
+| bm25 | 0.625 | 0.917 | 0.764 | 0.787 |
+| semantic | 0.792 | 1.000 | 0.889 | 0.918 |
+| **hybrid** | **0.833** | **1.000** | **0.903** | **0.928** |
+
+Hybrid (BM25 + semantic merged with RRF) ranks the correct report first **83%** of the time vs **63%** for lexical-only BM25, and always surfaces it within the top 3. The reports share an identical structure and differ mainly in their numbers, so picking the right quarter is a genuine ranking challenge. See [`eval/`](eval/) for the dataset, metrics, and full report.
+
+---
+
 ## API
 
 | Endpoint | Method | Description |

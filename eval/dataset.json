@@ -1,0 +1,37 @@
+{
+  "corpus": [
+    { "docId": "q1-2026", "file": "samples/synthetic-financial-reports/bao-cao-tai-chinh-gia-lap-q1-2026.md", "title": "Báo cáo tài chính Q1/2026 - Northstar" },
+    { "docId": "q2-2026", "file": "samples/synthetic-financial-reports/bao-cao-tai-chinh-gia-lap-q2-2026.md", "title": "Báo cáo tài chính Q2/2026 - Northstar" },
+    { "docId": "q3-2026", "file": "samples/synthetic-financial-reports/bao-cao-tai-chinh-gia-lap-q3-2026.md", "title": "Báo cáo tài chính Q3/2026 - Northstar" },
+    { "docId": "q4-2026", "file": "samples/synthetic-financial-reports/bao-cao-tai-chinh-gia-lap-q4-2026.md", "title": "Báo cáo tài chính Q4/2026 - Northstar" }
+  ],
+  "questions": [
+    { "id": "q1-revenue", "question": "Doanh thu thuần quý 1 năm 2026 là bao nhiêu?", "relevant_doc_ids": ["q1-2026"] },
+    { "id": "q1-ebitda", "question": "EBITDA điều chỉnh trong Q1/2026 đạt bao nhiêu tỷ đồng?", "relevant_doc_ids": ["q1-2026"] },
+    { "id": "q1-pricing-delay", "question": "Dự án Pricing Engine 2.1 chậm bao nhiêu tuần so với kế hoạch trong quý đầu năm?", "relevant_doc_ids": ["q1-2026"] },
+    { "id": "q1-return-rate", "question": "Tỷ lệ hoàn hàng trong Q1/2026 là bao nhiêu phần trăm?", "relevant_doc_ids": ["q1-2026"] },
+    { "id": "q1-electronics-revenue", "question": "Doanh thu ngành Điện tử tiêu dùng trong Q1/2026 là bao nhiêu?", "relevant_doc_ids": ["q1-2026"] },
+    { "id": "q1-net-debt", "question": "Tỷ lệ Net Debt trên EBITDA LTM cuối Q1/2026 là bao nhiêu lần?", "relevant_doc_ids": ["q1-2026"] },
+
+    { "id": "q2-revenue", "question": "Doanh thu thuần Q2/2026 đạt bao nhiêu tỷ đồng?", "relevant_doc_ids": ["q2-2026"] },
+    { "id": "q2-vendor-rebate", "question": "Vendor rebates và marketing support đóng góp bao nhiêu tỷ vào biên gộp trong Q2?", "relevant_doc_ids": ["q2-2026"] },
+    { "id": "q2-pat", "question": "Lợi nhuận sau thuế quý 2 năm 2026 là bao nhiêu?", "relevant_doc_ids": ["q2-2026"] },
+    { "id": "q2-retention", "question": "Chỉ số 30D app retention trong Q2/2026 là bao nhiêu phần trăm?", "relevant_doc_ids": ["q2-2026"] },
+    { "id": "q2-ccc", "question": "Chu kỳ chuyển đổi tiền mặt cuối Q2/2026 là bao nhiêu ngày?", "relevant_doc_ids": ["q2-2026"] },
+
+    { "id": "q3-loss", "question": "Quý nào trong năm 2026 công ty báo lỗ sau thuế và lỗ bao nhiêu?", "relevant_doc_ids": ["q3-2026"] },
+    { "id": "q3-revenue-drop", "question": "Doanh thu thuần Q3/2026 giảm bao nhiêu phần trăm so với Q2?", "relevant_doc_ids": ["q3-2026"] },
+    { "id": "q3-writedown", "question": "Giá trị write-down hàng tồn kho chậm luân chuyển trong Q3 là bao nhiêu?", "relevant_doc_ids": ["q3-2026"] },
+    { "id": "q3-ocf", "question": "Dòng tiền từ hoạt động kinh doanh trong Q3/2026 là bao nhiêu?", "relevant_doc_ids": ["q3-2026"] },
+    { "id": "q3-south-ontime", "question": "Tỷ lệ giao đúng hẹn ở miền Nam thấp nhất rơi vào quý nào và bằng bao nhiêu?", "relevant_doc_ids": ["q3-2026"] },
+    { "id": "q3-incidents", "question": "Những sự cố lớn nào đã xảy ra theo từng tuần trong quý khủng hoảng?", "relevant_doc_ids": ["q3-2026"] },
+    { "id": "q3-nps", "question": "NPS thấp nhất trong năm rơi vào quý nào và bằng bao nhiêu?", "relevant_doc_ids": ["q3-2026"] },
+
+    { "id": "q4-revenue", "question": "Doanh thu thuần Q4/2026 là bao nhiêu tỷ đồng?", "relevant_doc_ids": ["q4-2026"] },
+    { "id": "q4-pat-recovery", "question": "Lợi nhuận sau thuế Q4/2026 quay về dương ở mức bao nhiêu?", "relevant_doc_ids": ["q4-2026"] },
+    { "id": "q4-inventory-days", "question": "Số ngày tồn kho cuối Q4/2026 là bao nhiêu ngày?", "relevant_doc_ids": ["q4-2026"] },
+    { "id": "q4-price-actions", "question": "Những hành động nào được thực hiện để ổn định hệ thống giá trong Q4?", "relevant_doc_ids": ["q4-2026"] },
+    { "id": "q4-ebitda", "question": "EBITDA báo cáo Q4/2026 đạt bao nhiêu tỷ đồng?", "relevant_doc_ids": ["q4-2026"] },
+    { "id": "q4-interest-coverage", "question": "Interest Coverage cuối Q4/2026 là bao nhiêu lần?", "relevant_doc_ids": ["q4-2026"] }
+  ]
+}
