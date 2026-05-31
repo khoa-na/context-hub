@@ -12,19 +12,6 @@ Upload files (or import web pages), then ask questions across everything you've 
 
 ---
 
-## Demo
-
-<!--
-  Record a ~15s screen capture (upload a doc → ask a question → watch the
-  streamed, cited answer), export it as docs/demo.gif, then uncomment the line
-  below. Recording instructions: docs/RECORDING.md
--->
-<!-- ![context-hub demo](docs/demo.gif) -->
-
-> 🎬 _Demo GIF placeholder — add `docs/demo.gif` and uncomment the image tag above. See [docs/RECORDING.md](docs/RECORDING.md)._
-
----
-
 ## Why this project is interesting
 
 Most "chat with your docs" demos stop at *embed → top-k → prompt*. This one implements the techniques that actually move retrieval quality:
