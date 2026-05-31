@@ -864,4 +864,7 @@ module.exports = {
   extractGeminiText,
   sanitizeModelAnswer,
   normalizeModelText,
+  // Exported for unit testing of structured-output parsing
+  extractFirstJsonObject,
+  parseStructuredAnswerPayload,
 };
