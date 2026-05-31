@@ -1,5 +1,7 @@
 # context-hub
 
+[![CI](https://github.com/khoa-na/context-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/khoa-na/context-hub/actions/workflows/ci.yml)
+
 Document Q&A app powered by Gemini, DashScope/Qwen, LanceDB, and a small vanilla JS UI.
 
 This branch includes:
@@ -272,4 +274,4 @@ Code-level config in `config.js`:
 - Full-document mode falls back to slice-and-synthesize when selected content exceeds the token budget.
 - Full-document and web-page modes select a schema focus preset from the question, but they still answer in natural language.
 - `data/index.json` is local metadata and may change during testing; document content and LanceDB storage stay local on each machine.
-- The repo currently has no automated test suite wired into `package.json`.
+- Unit tests live in `test/` and run with Node's built-in test runner via `npm test` (also run in CI on every push and pull request).
